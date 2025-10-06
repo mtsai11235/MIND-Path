@@ -22,8 +22,9 @@ jobs:
 
     defaults:
       run:
-        working-directory: MIND-Path
+        working-directory: /MIND-Path
     steps:
+    - run: ls
     - uses: actions/checkout@v4
     - name: Use Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@v4
