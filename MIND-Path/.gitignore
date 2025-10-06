@@ -41,3 +41,6 @@ app-example
 # generated native folders
 /ios
 /android
+
+# test snapshots
+__tests__/__snapshots__
