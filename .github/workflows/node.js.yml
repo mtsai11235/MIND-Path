@@ -9,8 +9,12 @@ on:
   pull_request:
     branches: [ "main" ]
   
+defaults:
+  run:
+    working-directory: MIND-Path
 
 jobs:
+
   build:
 
     runs-on: ubuntu-latest
@@ -21,10 +25,34 @@ jobs:
         # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
     steps:
+    - name: Check for EXPO_TOKEN
+      run: |
+        if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+          echo "You must provide an EXPO_TOKEN secret linked to this project's Expo account in this repo's secrets. Learn more: https://docs.expo.dev/eas-update/github-actions"
+          exit 1
+        fi
+
     - uses: actions/checkout@v4
-    - run: | 
-        cd MIND-Path
-        npm install
-    - run: | 
-        cd MIND-Path
-        npm test
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Setup EAS
+      uses: expo/expo-github-action@v8
+      with:
+        eas-version: latest
+        token: ${{ secrets.EXPO_TOKEN }}
+    
+    - name: Run Tests
+    - run: npm test
+
+    - name: Build preview
+      uses: expo/expo-github-action/preview@v8
+      with:
+        command: eas update --auto
