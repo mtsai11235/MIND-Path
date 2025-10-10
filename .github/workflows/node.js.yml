@@ -50,7 +50,7 @@ jobs:
         token: ${{ secrets.EXPO_TOKEN }}
     
     - name: Run Tests
-    - run: npm test
+      run: npm test
 
     - name: Build preview
       uses: expo/expo-github-action/preview@v8
