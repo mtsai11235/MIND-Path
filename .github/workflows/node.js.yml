@@ -54,4 +54,5 @@ jobs:
       run: npm test
 
     - name: Build App
-      run: eas build --non-interactive
+      run: eas build --non-interactive --platform android
+      run: eas build --non-interactive --platform ios
