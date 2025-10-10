@@ -53,7 +53,7 @@ jobs:
     - name: Run Tests
       run: npm test
 
-    - name: Build preview
+    - name: Build App
       uses: expo/expo-github-action/preview@v8
       with:
-        command: eas update --auto
+        command: eas build --non-interactive
