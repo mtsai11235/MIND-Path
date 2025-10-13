@@ -9,7 +9,16 @@ import {
   TextInput,
   FlatList,
   Dimensions,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
+import { Tabs } from 'expo-router';
+import { useChat } from '@ai-sdk/react';
+import { DefaultChatTransport } from 'ai';
+import { fetch as expoFetch } from 'expo/fetch';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { generateAPIUrl } from '@/utils/utils';
 
 /** ---------- Types ---------- */
 type Mood = { key: string; label: string; emoji: string; bg: string };
@@ -25,24 +34,29 @@ const MOODS: Mood[] = [
 ];
 
 /** ---------- Layout constants ---------- */
-const ITEM_W = 72;                     // width of each mood item (slider card)
-const ITEM_MR = 12;                    // horizontal gap between mood items
+const ITEM_W = 72;                       // mood item width
+const ITEM_MR = 12;                      // mood item gap
 const { width: W, height: H } = Dimensions.get("window");
-const CARD_MIN = Math.round(H * 0.52); // min height of the big green card
-const CIRCLE_SIZE = Math.round(W * 1.2); // size of the decorative circle
+const CARD_MIN = Math.round(H * 0.52);   // big green card min-height
+const CIRCLE_SIZE = Math.round(W * 1.2); // decorative circle size
 
 /** ---------- Theme colors ---------- */
-const GREEN_MAIN   = "#3F9360";         // main green (big card background)
-const GREEN_LIGHT  = "#DDEFE6";         // light green (bubble, tab active bg)
+const GREEN_MAIN   = "#3F9360";
+const GREEN_LIGHT  = "#DDEFE6";
+const GREEN_LIGHT_ALT = "#CFE7DB";       // slightly deeper than GREEN_LIGHT
 const GREEN_BORDER = "rgba(6,95,70,0.14)";
-const GREEN_TEXT   = "#065F46";         // dark green text for contrast
-const PLACEHOLDER  = "#3a6a54";         // search placeholder color
+const GREEN_TEXT   = "#065F46";
+const PLACEHOLDER  = "#3a6a54";
+
+/** ---------- Profile clinic card colors ---------- */
+const PEACH_LIGHT  = "#FEF3E7";
+const PEACH_BORDER = "rgba(240, 180, 140, 0.35)";
 
 export default function Index() {
-  /** Simple state-based routing for bottom tabs */
+  /** Local tab state (no external nav lib for bottom tabs) */
   const [tab, setTab] = useState<Tab>("Home");
 
-  /** Time-based greeting: Morning / Afternoon / Evening */
+  /** Time-based greeting */
   const greeting = useMemo(() => {
     const h = new Date().getHours();
     if (h < 12) return "Good Morning!";
@@ -50,7 +64,7 @@ export default function Index() {
     return "Good Evening!";
   }, []);
 
-  /** Offsets for FlatList snap */
+  /** Snap offsets for mood FlatList */
   const snapOffsets = useMemo(() => {
     const arr: number[] = [];
     const leftPad = 16;
@@ -58,12 +72,21 @@ export default function Index() {
     return arr;
   }, []);
 
-  /** Render current screen content by active tab */
+  /** Home searchbar submit -> switch tabs */
+  const onHomeSearchSubmit = (text: string) => {
+    const q = text.trim().toLowerCase();
+    if (q === 'chat') return setTab('Chat');
+    if (q === 'resources' || q === 'resource') return setTab('Resources');
+    if (q === 'profile' || q === 'me' || q === 'account') return setTab('Profile');
+  };
+
+  /** Render current tab content */
   const renderScreen = () => {
-    if (tab === "Home") return <HomeContent greeting={greeting} snapOffsets={snapOffsets} />;
-    if (tab === "Chat") return <Placeholder title="Chat" subtitle="(Placeholder) Previous chats / quick notes" />;
-    if (tab === "Resources") return <Placeholder title="Resources" subtitle="(Placeholder) Nearby clinics & articles" />;
-    return <Placeholder title="Profile" subtitle="(Placeholder) Account & settings" />;
+    if (tab === "Home") return <HomeContent greeting={greeting} snapOffsets={snapOffsets} onSearchSubmit={onHomeSearchSubmit} />;
+    if (tab === "Chat") return <ChatScreen />;
+    if (tab === "Resources") return <ResourcesContent />;
+    if (tab === "Profile") return <ProfileContent />;
+    return null;
   };
 
   return (
@@ -71,7 +94,7 @@ export default function Index() {
       <StatusBar barStyle="dark-content" backgroundColor="#f3f4f6" />
       {renderScreen()}
 
-      {/* ---------- Bottom Tab Bar (no external navigation lib) ---------- */}
+      {/* Bottom tab bar (hand-rolled) */}
       <View style={styles.tabbar}>
         <TabItem label="Home"      icon="🏠" active={tab === "Home"}      onPress={() => setTab("Home")} />
         <TabItem label="Chat"      icon="💬" active={tab === "Chat"}      onPress={() => setTab("Chat")} />
@@ -82,28 +105,136 @@ export default function Index() {
   );
 }
 
-/** ---------- Home Screen: header + greeting + mood slider + big green card ---------- */
-function HomeContent({
-  greeting,
-  snapOffsets,
-}: {
-  greeting: string;
-  snapOffsets: number[];
-}) {
-  const [search, setSearch] = useState("");
-  const [selectedMood, setSelectedMood] = useState<string | null>(null);
+/** ---------- Tabs layout for expo-router (kept minimal) ---------- */
+export function TabsLayout() {
+  return (
+    <Tabs>
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Home',
+          headerShown: false,
+        }}
+      />
+    </Tabs>
+  );
+}
 
-  /** CTA buttons (placeholder actions for now) */
-  const onStartConversation = () => console.log("Start conversation pressed");
-  const onGetStarted = () => console.log("Get started pressed");
+/** ---------- Chat screen ---------- */
+export function ChatScreen() {
+  const [input, setInput] = useState('');
+  const { messages, error, sendMessage } = useChat({
+    transport: new DefaultChatTransport({
+      fetch: expoFetch as unknown as typeof globalThis.fetch,
+      api: generateAPIUrl('api/chat'),
+    }),
+    onError: error => console.error(error, 'ERROR'),
+  });
 
-  /** Toggle selected mood (white background when selected) */
-  const onMoodPress = (m: Mood) =>
-    setSelectedMood((prev) => (prev === m.key ? null : m.key));
+  if (error) return <Text>{error.message}</Text>;
 
   return (
-    <>
-      {/* ---------- Shared Header (avatar + bell) ---------- */}
+    <SafeAreaProvider style={{ height: '100%' }}>
+      <View style={styles.chatWrap}>
+        {/* Messages list */}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 12 }}
+        >
+          {messages.map(m => {
+            const isUser = m.role === 'user';
+            return (
+              <View
+                key={m.id}
+                style={[styles.msgRow, { alignItems: isUser ? 'flex-end' : 'flex-start' }]}
+              >
+                <View style={isUser ? styles.bubbleUser : styles.bubbleAssistant}>
+                  {m.parts.map((part, i) => {
+                    if (part.type === 'text') {
+                      return (
+                        <Text key={`${m.id}-${i}`} style={styles.msgText}>
+                          {part.text}
+                        </Text>
+                      );
+                    }
+                    return null;
+                  })}
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
+
+        {/* Input area */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+        >
+          <View style={styles.chatInputWrap}>
+            <TextInput
+              style={styles.chatInput}
+              placeholder="Say something..."
+              placeholderTextColor={PLACEHOLDER}
+              value={input}
+              onChange={e => setInput(e.nativeEvent.text)}
+              onSubmitEditing={e => {
+                e.preventDefault();
+                if (input.trim().length === 0) return;
+                sendMessage({ text: input });
+                setInput('');
+              }}
+              autoFocus={true}
+              returnKeyType="send"
+            />
+          </View>
+        </KeyboardAvoidingView>
+      </View>
+    </SafeAreaProvider>
+  );
+}
+
+/** ---------- Resources screen (title + alternating large cards) ---------- */
+function ResourcesContent() {
+  const items = Array.from({ length: 5 }, (_, i) => `Resources ${i + 1}`);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+      {/* Header title (left-top aligned) */}
+      <View style={styles.resourceHeader}>
+        <Text style={styles.resourceHeaderText}>Resources</Text>
+      </View>
+
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.resourceList}
+        showsVerticalScrollIndicator={false}
+      >
+        {items.map((label, idx) => (
+          <View
+            key={label}
+            style={[
+              styles.resourceCard,
+              idx % 2 === 1 && styles.resourceCardAlt, // alternate colors for contrast
+            ]}
+          >
+            <Text style={styles.resourceTitle}>{label}</Text>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+/** ---------- Profile screen (hardcoded UI + "mood-card style" buttons) ---------- */
+function ProfileContent() {
+  // Track selected states for Chat1/2/3 and R1/2 (multi-select, toggled like mood cards)
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const togglePick = (key: string) =>
+    setPicked(prev => ({ ...prev, [key]: !prev[key] }));
+
+  return (
+    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+      {/* Reuse shared header (avatar + bell) */}
       <View style={styles.header}>
         <View style={styles.avatar}><Text style={{ fontSize: 18 }}>🧑🏻‍🦱</Text></View>
         <View style={{ flex: 1 }} />
@@ -113,13 +244,139 @@ function HomeContent({
         </View>
       </View>
 
-      {/* ---------- Greeting ---------- */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 20 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Top green card: Previous chats / Resources */}
+        <View style={styles.profileTopCard}>
+          <Text style={styles.profileTopTitle}>Previous chats / Resources</Text>
+
+          <View style={{ flexDirection: "row", marginTop: 10 }}>
+            {/* Left column: Chats */}
+            <View style={{ flex: 1 }}>
+              {["Chat1", "Chat2", "Chat3"].map(label => {
+                const isSelected = !!picked[label];
+                return (
+                  <Pressable
+                    key={label}
+                    accessibilityRole="button"
+                    onPress={() => togglePick(label)}
+                    style={[
+                      styles.choiceItem,
+                      {
+                        backgroundColor: isSelected ? "#ffffff" : GREEN_LIGHT,
+                        borderWidth: isSelected ? 1 : 0,
+                        borderColor: isSelected ? "#cbd5e1" : "transparent",
+                      },
+                    ]}
+                  >
+                    <Text style={styles.choiceLabel}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={{ width: 24 }} />
+
+            {/* Right column: Resources */}
+            <View style={{ flex: 1 }}>
+              {["R1", "R2"].map(label => {
+                const isSelected = !!picked[label];
+                return (
+                  <Pressable
+                    key={label}
+                    accessibilityRole="button"
+                    onPress={() => togglePick(label)}
+                    style={[
+                      styles.choiceItem,
+                      {
+                        backgroundColor: isSelected ? "#ffffff" : GREEN_LIGHT,
+                        borderWidth: isSelected ? 1 : 0,
+                        borderColor: isSelected ? "#cbd5e1" : "transparent",
+                      },
+                    ]}
+                  >
+                    <Text style={styles.choiceLabel}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* Decorative blob */}
+          <View style={styles.profileTopDecor} />
+        </View>
+
+        {/* "Near by Me ▾" section header */}
+        <View style={styles.nearbyHeader}>
+          <Text style={styles.nearbyTitle}>Near by Me</Text>
+          <Text style={styles.nearbyChevron}>▾</Text>
+        </View>
+
+        {/* Two static clinic cards */}
+        <View style={styles.clinicCard}>
+          <Text style={styles.clinicTitle}>Clinic 1</Text>
+          <View style={styles.clinicDivider} />
+          <Text style={styles.clinicSubtitle}>Location，information..</Text>
+
+          <Pressable style={styles.apptBtn}>
+            <Text style={styles.apptBtnText}>Appointment time</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.clinicCard}>
+          <Text style={styles.clinicTitle}>Clinic 2</Text>
+          <View style={styles.clinicDivider} />
+          <Text style={styles.clinicSubtitle}>Location，information..</Text>
+
+          <Pressable style={styles.apptBtn}>
+            <Text style={styles.apptBtnText}>Appointment time</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+/** ---------- Home screen ---------- */
+function HomeContent({
+  greeting,
+  snapOffsets,
+  onSearchSubmit,
+}: {
+  greeting: string;
+  snapOffsets: number[];
+  onSearchSubmit?: (text: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [selectedMood, setSelectedMood] = useState<string | null>(null);
+
+  const onStartConversation = () => console.log("Start conversation pressed");
+  const onGetStarted = () => console.log("Get started pressed");
+  const onMoodPress = (m: Mood) =>
+    setSelectedMood((prev) => (prev === m.key ? null : m.key));
+
+  return (
+    <>
+      {/* Shared header */}
+      <View style={styles.header}>
+        <View style={styles.avatar}><Text style={{ fontSize: 18 }}>🧑🏻‍🦱</Text></View>
+        <View style={{ flex: 1 }} />
+        <View style={styles.bellWrap}>
+          <Text style={{ fontSize: 20 }}>🔔</Text>
+          <View style={styles.badge}><Text style={styles.badgeText}>3</Text></View>
+        </View>
+      </View>
+
+      {/* Greeting */}
       <View style={styles.titleWrap}>
         <Text style={styles.title}>{greeting}</Text>
         <Text style={styles.question}>How are you feeling today?</Text>
       </View>
 
-      {/* ---------- Mood Slider ---------- */}
+      {/* Mood slider */}
       <FlatList
         data={MOODS}
         keyExtractor={(m) => m.key}
@@ -152,16 +409,15 @@ function HomeContent({
         }}
       />
 
-      {/* ---------- Big Green Card ---------- */}
+      {/* Big green card */}
       <View style={styles.bigCard}>
-        {/* Decorative lotus badge */}
+        {/* Lotus badge */}
         <View style={styles.lotus}><Text style={{ fontSize: 28 }}>🪷</Text></View>
 
-        {/* ===== “MindPath is …” bubble =====*/}
+        {/* Inner bubble */}
         <View style={styles.innerCard}>
           <Text style={styles.innerTitle}>MindPath is …</Text>
 
-          {/* Primary CTAs */}
           <Pressable onPress={onStartConversation} style={styles.primaryBtn}>
             <Text style={styles.primaryBtnText}>Start a conversation…</Text>
           </Pressable>
@@ -171,7 +427,7 @@ function HomeContent({
           </Pressable>
         </View>
 
-        {/* Search bar (stay close by reducing marginTop) */}
+        {/* Searchbar */}
         <View style={styles.searchBar}>
           <Text style={styles.searchIcon}>🔎</Text>
           <TextInput
@@ -181,39 +437,18 @@ function HomeContent({
             onChangeText={setSearch}
             style={styles.searchInput}
             returnKeyType="search"
-            onSubmitEditing={() => console.log("search:", search)}
+            onSubmitEditing={() => onSearchSubmit?.(search)}
           />
         </View>
 
-        {/* Right-bottom decorative circle */}
+        {/* Decorative circle */}
         <View pointerEvents="none" style={styles.circleDecor} />
       </View>
     </>
   );
 }
 
-/** ---------- Placeholder Screen Template (Chat / Resources / Profile) ---------- */
-function Placeholder({ title, subtitle }: { title: string; subtitle?: string }) {
-  return (
-    <View style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
-      <View style={styles.header}>
-        <View style={styles.avatar}><Text style={{ fontSize: 18 }}>🧑🏻‍🦱</Text></View>
-        <View style={{ flex: 1 }} />
-        <View style={styles.bellWrap}>
-          <Text style={{ fontSize: 20 }}>🔔</Text>
-          <View style={styles.badge}><Text style={styles.badgeText}>3</Text></View>
-        </View>
-      </View>
-
-      <View style={{ flex: 1, paddingHorizontal: 16, paddingTop: 6, justifyContent: "center", alignItems: "center" }}>
-        <Text style={{ fontSize: 22, fontWeight: "700", color: "#111827", marginBottom: 8 }}>{title}</Text>
-        {!!subtitle && <Text style={{ color: "#6b7280" }}>{subtitle}</Text>}
-      </View>
-    </View>
-  );
-}
-
-/** ---------- Single Tab Button ---------- */
+/** ---------- Single tab button ---------- */
 function TabItem({
   label,
   icon,
@@ -233,12 +468,12 @@ function TabItem({
   );
 }
 
-/** ---------- Styles (centralized controls) ---------- */
+/** ---------- Styles ---------- */
 const styles = StyleSheet.create({
   /** App background */
   container: { flex: 1, backgroundColor: "#f3f4f6" },
 
-  /** Top header shared across screens */
+  /** Shared header */
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -283,7 +518,7 @@ const styles = StyleSheet.create({
   moodEmoji: { fontSize: 24, marginBottom: 6 },
   moodLabel: { fontSize: 12, color: "#374151" },
 
-  /** Big green card (container for bubble + search) */
+  /** Big green card (container) */
   bigCard: {
     minHeight: CARD_MIN,
     marginHorizontal: 16,
@@ -296,7 +531,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
 
-  /** Lotus badge inside the big card */
+  /** Lotus badge */
   lotus: {
     width: 52,
     height: 52,
@@ -308,7 +543,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
 
-  /** ===== “MindPath is …” bubble ===== */
+  /** Inner bubble within big card */
   innerCard: {
     backgroundColor: GREEN_LIGHT,
     borderRadius: 18,
@@ -319,8 +554,6 @@ const styles = StyleSheet.create({
     zIndex: 3,
     elevation: 3,
   },
-
-  /** Title inside the bubble */
   innerTitle: {
     fontWeight: "700",
     color: GREEN_TEXT,
@@ -328,7 +561,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 
-  /** Primary CTAs in the bubble */
+  /** Primary buttons (within inner bubble) */
   primaryBtn: {
     backgroundColor: GREEN_LIGHT,
     borderRadius: 12,
@@ -342,7 +575,7 @@ const styles = StyleSheet.create({
   primaryBtnText: { color: GREEN_TEXT, fontWeight: "700" },
   orText: { textAlign: "center", color: GREEN_TEXT, marginVertical: 6 },
 
-  /** Searchbar */
+  /** Searchbar on Home */
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -360,7 +593,7 @@ const styles = StyleSheet.create({
   searchIcon: { fontSize: 16, marginRight: 8, color: "#355c47" },
   searchInput: { flex: 1, fontSize: 14, color: "#1f2937" },
 
-  /** Right-bottom decorative circle */
+  /** Decorative circle in big card */
   circleDecor: {
     position: "absolute",
     right: -CIRCLE_SIZE * 0.55,
@@ -372,7 +605,7 @@ const styles = StyleSheet.create({
     zIndex: 0,
   },
 
-  /** Bottom tab bar (static) */
+  /** Bottom tab bar */
   tabbar: {
     flexDirection: "row",
     backgroundColor: "#ffffff",
@@ -392,4 +625,190 @@ const styles = StyleSheet.create({
   tabIcon: { fontSize: 18 },
   tabLabel: { fontSize: 11, color: "#6b7280", marginTop: 2 },
   tabLabelActive: { color: GREEN_TEXT, fontWeight: "700" },
+
+  /** ---------- Chat styles ---------- */
+  chatWrap: {
+    height: '95%',
+    display: 'flex',
+    flexDirection: 'column',
+    paddingHorizontal: 8,
+  },
+  msgRow: {
+    width: '100%',
+    marginVertical: 6,
+  },
+  bubbleAssistant: {
+    maxWidth: '82%',
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  bubbleUser: {
+    maxWidth: '82%',
+    backgroundColor: GREEN_LIGHT,
+    borderRadius: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: GREEN_BORDER,
+  },
+  msgText: {
+    fontSize: 14,
+    color: '#111827',
+    lineHeight: 20,
+  },
+  chatInputWrap: {
+    backgroundColor: GREEN_LIGHT,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: GREEN_BORDER,
+    marginHorizontal: 4,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+  },
+  chatInput: {
+    height: 44,
+    fontSize: 14,
+    color: '#1f2937',
+  },
+
+  /** ---------- Resources styles ---------- */
+  resourceHeader: {
+    paddingTop: 12,
+    paddingBottom: 4,
+    paddingHorizontal: 16,
+  },
+  resourceHeaderText: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: GREEN_TEXT,
+  },
+  resourceList: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 28,
+  },
+  resourceCard: {
+    backgroundColor: GREEN_LIGHT,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: GREEN_BORDER,
+    paddingVertical: 20,
+    paddingHorizontal: 18,
+    minHeight: Math.round(H * 0.24),
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  resourceCardAlt: {
+    backgroundColor: GREEN_LIGHT_ALT,
+  },
+  resourceTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: GREEN_TEXT,
+  },
+
+  /** ---------- Profile styles ---------- */
+  profileTopCard: {
+    backgroundColor: GREEN_LIGHT,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: GREEN_BORDER,
+    padding: 16,
+    position: "relative",
+    overflow: "hidden",
+    marginBottom: 14,
+  },
+  profileTopTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: GREEN_TEXT,
+  },
+  profileTopDecor: {
+    position: "absolute",
+    right: -80,
+    bottom: -60,
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: "rgba(255,255,255,0.28)",
+    transform: [{ rotate: "12deg" }],
+  },
+
+  // "Mood-card style" choice buttons used in Profile's top card
+  choiceItem: {
+    height: 44,
+    borderRadius: 16,
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    marginBottom: 8,
+  },
+  choiceLabel: {
+    fontSize: 14,
+    color: "#374151",
+    fontWeight: "600",
+  },
+
+  /** Nearby section */
+  nearbyHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8, // if your RN version doesn't support `gap`, use margins
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    marginBottom: 8,
+  },
+  nearbyTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#5c4235",
+  },
+  nearbyChevron: {
+    marginLeft: 6,
+    fontSize: 14,
+    color: "#97877d",
+  },
+
+  /** Clinic cards */
+  clinicCard: {
+    backgroundColor: PEACH_LIGHT,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: PEACH_BORDER,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 14,
+  },
+  clinicTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#5c4235",
+    marginBottom: 8,
+  },
+  clinicDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(0,0,0,0.08)",
+    marginBottom: 8,
+  },
+  clinicSubtitle: {
+    fontSize: 13,
+    color: "#7a6f68",
+    marginBottom: 12,
+  },
+  apptBtn: {
+    alignSelf: "flex-start",
+    backgroundColor: GREEN_LIGHT,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: GREEN_BORDER,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  apptBtnText: {
+    color: GREEN_TEXT,
+    fontWeight: "700",
+  },
 });
