@@ -12,16 +12,24 @@ import {
   Linking,
   StyleSheet,
 } from 'react-native';
-import {
-  searchProvidersPaged,
-  ProviderRow,
-} from '@/utils/db';
+import { searchProvidersPaged, ProviderRow } from '@/utils/db';
 
 const PAGE_SIZE = 20;
+
+// Simple de-duplication: treat same provider + same phone as one entry
+function dedupe(rows: ProviderRow[]) {
+  const map = new Map<string, ProviderRow>();
+  for (const r of rows) {
+    const key = `${r.provider_id ?? 'nil'}|${r.phone ?? ''}`;
+    if (!map.has(key)) map.set(key, r);
+  }
+  return Array.from(map.values());
+}
 
 export default function ResourcesTab() {
   const [rows, setRows] = useState<ProviderRow[]>([]);
   const [total, setTotal] = useState(0);
+
   const [q, setQ] = useState('');
   const [taxonomy, setTaxonomy] = useState('');
   const [city, setCity] = useState('BOSTON');
@@ -29,32 +37,32 @@ export default function ResourcesTab() {
 
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [offset, setOffset] = useState(0); // current offset for pagination
+  const [offset, setOffset] = useState(0);
 
-  // Function to load provider data (either reset or load more)
-  async function load(reset = true) {
-    if (reset) {
-      setLoading(true);
-      setOffset(0);
-    } else {
-      setLoadingMore(true);
-    }
-
+  // Core loader: reset for a new search or append for pagination
+  async function load({ reset, nextOffset }: { reset: boolean; nextOffset?: number }) {
     try {
+      if (reset) setLoading(true);
+      else setLoadingMore(true);
+
+      const effectiveOffset = reset ? 0 : (nextOffset ?? offset);
       const { rows: newRows, total: newTotal } = await searchProvidersPaged({
         q,
         taxonomy,
         city,
         state,
         limit: PAGE_SIZE,
-        offset: reset ? 0 : offset,
+        offset: effectiveOffset,
       });
 
       if (reset) {
-        setRows(newRows);
+        setRows(dedupe(newRows));
+        setOffset(newRows.length);
       } else {
-        setRows(prev => [...prev, ...newRows]);
+        setRows(prev => dedupe([...prev, ...newRows]));
+        setOffset(effectiveOffset + newRows.length);
       }
+
       setTotal(newTotal);
     } finally {
       setLoading(false);
@@ -62,9 +70,8 @@ export default function ResourcesTab() {
     }
   }
 
-  // Load default city data when the screen first opens
   useEffect(() => {
-    load(true);
+    load({ reset: true });
   }, []);
 
   const canLoadMore = rows.length < total;
@@ -84,12 +91,12 @@ export default function ResourcesTab() {
           <Text style={styles.title}>Search Providers</Text>
           <Text style={styles.subtitle}>Find clinics and professionals near you</Text>
 
-          {/* Search form card */}
+          {/* Search Card */}
           <View style={styles.searchCard}>
             <TextInput
               placeholder="State (e.g. MA)"
               value={state}
-              onChangeText={(t) => setState(t.toUpperCase())}
+              onChangeText={t => setState(t.toUpperCase())}
               style={styles.input}
               placeholderTextColor="#9CA3AF"
               autoCapitalize="characters"
@@ -97,7 +104,7 @@ export default function ResourcesTab() {
             <TextInput
               placeholder="City (e.g. BOSTON)"
               value={city}
-              onChangeText={(t) => setCity(t.toUpperCase())}
+              onChangeText={t => setCity(t.toUpperCase())}
               style={styles.input}
               placeholderTextColor="#9CA3AF"
               autoCapitalize="characters"
@@ -116,9 +123,8 @@ export default function ResourcesTab() {
               style={styles.input}
               placeholderTextColor="#9CA3AF"
             />
-
             <TouchableOpacity
-              onPress={() => load(true)}
+              onPress={() => load({ reset: true })}
               activeOpacity={0.8}
               style={[styles.button, loading && styles.buttonDisabled]}
               disabled={loading}
@@ -129,20 +135,21 @@ export default function ResourcesTab() {
             </TouchableOpacity>
           </View>
 
-          {/* Search result count */}
+          {/* Result Count */}
           <Text style={styles.resultCount}>
             {loading && rows.length === 0
               ? 'Searching...'
               : `Found ${total} ${total === 1 ? 'result' : 'results'}${city ? ` in ${city}` : ''}${state ? `, ${state}` : ''}`}
           </Text>
 
-          {/* Result list */}
-          {rows.map((r) => (
-            <View key={r.provider_id} style={styles.card}>
+          {/* Result List */}
+          {rows.map((r, idx) => (
+            <View
+              key={`${r.provider_id ?? 'nil'}-${r.city ?? 'nil'}-${r.phone ?? 'nil'}-${idx}`}
+              style={styles.card}
+            >
               <Text style={styles.name}>{r.basic_name || '(no name)'}</Text>
-              <Text style={styles.meta}>
-                {r.city}, {r.state}
-              </Text>
+              <Text style={styles.meta}>{r.city}, {r.state}</Text>
 
               {r.phone ? (
                 <Text
@@ -157,13 +164,12 @@ export default function ResourcesTab() {
             </View>
           ))}
 
-          {/* Load more button */}
+          {/* Load More Button */}
           {canLoadMore && (
             <TouchableOpacity
               onPress={() => {
-                const next = offset + PAGE_SIZE;
-                setOffset(next);
-                load(false);
+                const next = offset;
+                load({ reset: false, nextOffset: next });
               }}
               activeOpacity={0.85}
               style={[styles.loadMoreBtn, loadingMore && styles.buttonDisabled]}
@@ -175,7 +181,6 @@ export default function ResourcesTab() {
             </TouchableOpacity>
           )}
 
-          {/* Bottom spacing */}
           <View style={{ height: 24 }} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -183,7 +188,6 @@ export default function ResourcesTab() {
   );
 }
 
-// Style definitions
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F6F7FB' },
   flex: { flex: 1 },
@@ -202,7 +206,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 12,
   },
-
   searchCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -235,7 +238,6 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { backgroundColor: '#93C5FD' },
   buttonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
-
   resultCount: {
     textAlign: 'center',
     color: '#6B7280',
@@ -243,7 +245,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 4,
   },
-
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -261,7 +262,6 @@ const styles = StyleSheet.create({
   meta: { marginTop: 4, color: '#6B7280' },
   link: { color: '#2563EB', marginTop: 6, fontWeight: '600' },
   tax: { color: '#374151', marginTop: 4 },
-
   loadMoreBtn: {
     height: 44,
     borderRadius: 12,
@@ -270,9 +270,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 16,
   },
-  loadMoreText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 15,
-  },
+  loadMoreText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
 });

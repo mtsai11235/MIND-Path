@@ -76,21 +76,30 @@ export type SearchProvidersResult = {
 export async function searchProvidersPaged(
   params: SearchProvidersParams
 ): Promise<SearchProvidersResult> {
+  // Normalize input
+  const state    = params.state?.trim().toUpperCase();
+  const city     = params.city?.trim().toUpperCase();
+  const q        = params.q?.trim();
+  const taxonomy = params.taxonomy?.trim();
+
   let query = supabase
     .from('provider_search_mh_view')
-    // count: 'exact' instructs Supabase to return an exact total row count
-    .select('*', { count: 'exact' });
+    .select('*', { count: 'exact' }); // exact = slower but accurate
 
-  if (params.state)    query = query.eq('state', params.state.toUpperCase());
-  if (params.city)     query = query.eq('city', params.city.toUpperCase());
-  if (params.q)        query = query.ilike('basic_name', `%${params.q}%`);
-  if (params.taxonomy) query = query.ilike('taxonomy_desc', `%${params.taxonomy}%`);
+  if (state)    query = query.eq('state', state);
+  if (city)     query = query.eq('city', city);
+  if (q)        query = query.ilike('basic_name', `%${q}%`);
+  if (taxonomy) query = query.ilike('taxonomy_desc', `%${taxonomy}%`);
 
-  const limit  = params.limit  ?? 20;
-  const offset = params.offset ?? 0;
+  const limit  = Math.max(1, Math.min(100, params.limit ?? 20));
+  const offset = Math.max(0, params.offset ?? 0);
 
+  // Stable ordering to prevent duplicated items across pages
   const { data, error, count } = await query
-    .order('basic_name', { ascending: true })
+    .order('basic_name', { ascending: true, nullsFirst: true })
+    .order('city',       { ascending: true, nullsFirst: true })
+    .order('state',      { ascending: true, nullsFirst: true })
+    .order('provider_id',{ ascending: true }) // stable tie-breaker
     .range(offset, offset + limit - 1);
 
   if (error) throw error;
