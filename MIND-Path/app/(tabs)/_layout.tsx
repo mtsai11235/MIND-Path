@@ -12,6 +12,15 @@ const _layout = () => {
                 headerShown: false
             }}
         />
+
+        {/* Resources page for test */}
+        <Tabs.Screen 
+            name = "resources"
+            options = {{
+                title: 'Resources',
+                headerShown: false
+            }}
+        />
     </Tabs>
   )
 }
