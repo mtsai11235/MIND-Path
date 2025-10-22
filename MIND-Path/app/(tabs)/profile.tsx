@@ -4,9 +4,11 @@ import {
   View,
   Pressable,
   ScrollView,
-  StyleSheet
+  StyleSheet,
 } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { useAuth } from "@/context/AuthContext";
+import LoginScreen from "./login";
 
 /** ---------- Theme colors ---------- */
 const GREEN_MAIN   = "#3F9360";
@@ -21,7 +23,8 @@ const PEACH_LIGHT  = "#FEF3E7";
 const PEACH_BORDER = "rgba(240, 180, 140, 0.35)";
 
 /** ---------- Profile screen (hardcoded UI + "mood-card style" buttons) ---------- */
-export default function ProfileContent() {
+function ProfileContent() {
+  const { logOut } = useAuth();
   // Track selected states for Chat1/2/3 and R1/2 (multi-select, toggled like mood cards)
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const togglePick = (key: string) =>
@@ -44,6 +47,14 @@ export default function ProfileContent() {
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 20 }}
         showsVerticalScrollIndicator={false}
       >
+        <Pressable
+          style={styles.logoutBtn}
+          accessibilityRole="button"
+          onPress={logOut}
+        >
+          <Text style={styles.logoutText}>Log out</Text>
+        </Pressable>
+
         {/* Top green card: Previous chats / Resources */}
         <View style={styles.profileTopCard}>
           <Text style={styles.profileTopTitle}>Previous chats / Resources</Text>
@@ -133,6 +144,14 @@ export default function ProfileContent() {
       </ScrollView>
     </SafeAreaProvider>
   );
+}
+
+export default function ProfileScreen() {
+  const { isLoggedIn } = useAuth();
+  if (!isLoggedIn) {
+    return <LoginScreen />;
+  }
+  return <ProfileContent />;
 }
 
 
@@ -267,4 +286,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   badgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
+
+  logoutBtn: {
+    alignSelf: "flex-end",
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: GREEN_BORDER,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 14,
+  },
+  logoutText: {
+    color: GREEN_TEXT,
+    fontSize: 12,
+    fontWeight: "700",
+  },
 })
