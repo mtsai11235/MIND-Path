@@ -232,9 +232,7 @@ export default function Index() {
                   <Text style={styles.innerDesc}>
                     It helps users understand their symptoms through conversational assessment, provides
                     educational resources about mental health topics, and connects them with appropriate
-                    local professionals and support services. By offering clear guidance and accessible
-                    information, MindPath empowers individuals and caregivers to take the right steps
-                    toward effective mental health care.
+                    local professionals and support services.
                   </Text>
                 </View>
               </Animated.View>
