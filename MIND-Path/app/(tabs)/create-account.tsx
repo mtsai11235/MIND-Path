@@ -7,7 +7,7 @@ import {
   StyleSheet,
   ScrollView,
 } from "react-native";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/context/AuthContext";
 
@@ -57,7 +57,7 @@ export default function CreateAccountScreen() {
   };
 
   return (
-    <SafeAreaProvider style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={styles.container}
@@ -147,7 +147,7 @@ export default function CreateAccountScreen() {
           </Pressable>
         </View>
       </ScrollView>
-    </SafeAreaProvider>
+    </SafeAreaView>
   );
 }
 
