@@ -1,15 +1,20 @@
-import { render } from '@testing-library/react-native';
+import {
+  describe,
+  test,
+  expect,
+} from "@jest/globals";
+import { render } from "@testing-library/react-native";
 
-import Example, { CustomText } from '@/app/example';
+import Example, { CustomText } from "@/app/example";
 
-describe('<Example />', () => {
-  test('Text renders correctly on Example Page', () => {
+describe("<Example />", () => {
+  test("Text renders correctly on Example Page", () => {
     const { getByText } = render(<Example />);
 
-    getByText('Welcome!');
+    getByText("Welcome!");
   });
 
-  test('CustomText renders correctly', () => {
+  test("CustomText renders correctly", () => {
     const tree = render(<CustomText>Some text</CustomText>).toJSON();
 
     expect(tree).toMatchSnapshot();
