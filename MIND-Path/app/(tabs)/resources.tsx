@@ -6,7 +6,7 @@ import {
   Dimensions,
   StyleSheet
 } from "react-native";
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 
 /** ---------- Theme colors ---------- */
@@ -25,7 +25,7 @@ export default function ResourcesContent() {
   const items = Array.from({ length: 5 }, (_, i) => `Resources ${i + 1}`);
 
   return (
-    <SafeAreaProvider style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
       {/* Header title (left-top aligned) */}
       <View style={styles.resourceHeader}>
         <Text style={styles.resourceHeaderText}>Resources</Text>
@@ -48,7 +48,7 @@ export default function ResourcesContent() {
           </View>
         ))}
       </ScrollView>
-      </SafeAreaProvider>
+      </SafeAreaView>
 
   );
 }
