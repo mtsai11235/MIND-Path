@@ -45,6 +45,13 @@ export default function TabsLayout() {
 
         }}
       />
+      <Tabs.Screen
+        name="create-account"
+        options={{
+          href: null,
+          headerShown: false,
+        }}
+      />
     </Tabs>
   );
 }

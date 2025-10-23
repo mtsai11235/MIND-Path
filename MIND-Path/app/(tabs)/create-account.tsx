@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -17,29 +17,15 @@ const GREEN_LIGHT = "#DDEFE6";
 const GREEN_BORDER = "rgba(6,95,70,0.14)";
 const GREEN_TEXT = "#065F46";
 const PLACEHOLDER = "#3a6a54";
-const ERROR_TEXT = "#dc2626";
 
-export default function LoginScreen() {
-  const { logIn, profile, isLoggedIn } = useAuth();
+export default function CreateAccountScreen() {
   const router = useRouter();
+  const { createAccount } = useAuth();
 
-  const [username, setUsername] = useState(profile?.username ?? "");
-  const [password, setPassword] = useState(profile?.password ?? "");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [zipcode, setZipcode] = useState("");
   const [secureEntry, setSecureEntry] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (profile) {
-      setUsername(profile.username);
-      setPassword(profile.password);
-    }
-  }, [profile]);
-
-  useEffect(() => {
-    if (isLoggedIn) {
-      router.replace("/(tabs)/profile");
-    }
-  }, [isLoggedIn, router]);
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -48,28 +34,25 @@ export default function LoginScreen() {
     return "Good Evening";
   }, []);
 
-  const handleLogin = async () => {
-    setError(null);
+  const handleCreateAccount = async () => {
     const trimmedUsername = username.trim();
     const trimmedPassword = password.trim();
+    const trimmedZip = zipcode.trim();
 
     if (!trimmedUsername || !trimmedPassword) return;
 
     try {
-      const success = await logIn({
+      await createAccount({
         username: trimmedUsername,
         password: trimmedPassword,
+        zipcode: trimmedZip,
+        previousChatSessionIds: [],
+        recommendedResourceIds: [],
+        clinicIds: [],
       });
-
-      if (!success) {
-        setError("Incorrect username or password. Please try again.");
-        return;
-      }
-
-      router.replace("/(tabs)/profile");
+      router.replace("/(tabs)/login");
     } catch (error) {
-      console.warn("Failed to sign in", error);
-      setError("Something went wrong while signing in. Please try again.");
+      console.warn("Failed to create account", error);
     }
   };
 
@@ -84,15 +67,16 @@ export default function LoginScreen() {
         <View style={styles.header}>
           <Text style={styles.greeting}>{greeting}</Text>
           <Text style={styles.subhead}>
-            Welcome back. Sign in to continue your path to calm.
+            Create your account to start chatting and exploring resources.
           </Text>
         </View>
 
         <View style={styles.card}>
           <View style={styles.cardAccent} />
-          <Text style={styles.cardTitle}>Log in</Text>
+          <Text style={styles.cardTitle}>Create account</Text>
           <Text style={styles.cardSubtitle}>
-            Pick up your chats, explore resources, and continue your path to calm.
+            Set up your login details and optionally share your zipcode for
+            location-based recommendations.
           </Text>
 
           <View style={styles.field}>
@@ -100,7 +84,7 @@ export default function LoginScreen() {
             <TextInput
               value={username}
               onChangeText={setUsername}
-              placeholder="Your name here"
+              placeholder="Choose a username"
               placeholderTextColor={PLACEHOLDER}
               autoCapitalize="none"
               style={styles.input}
@@ -113,7 +97,7 @@ export default function LoginScreen() {
               <TextInput
                 value={password}
                 onChangeText={setPassword}
-                placeholder="Enter your password"
+                placeholder="Create a password"
                 placeholderTextColor={PLACEHOLDER}
                 secureTextEntry={secureEntry}
                 style={styles.passwordInput}
@@ -130,29 +114,38 @@ export default function LoginScreen() {
             </View>
           </View>
 
-          <Pressable
-            style={styles.loginBtn}
-            onPress={handleLogin}
-            accessibilityRole="button"
-          >
-            <Text style={styles.loginBtnText}>Log in</Text>
-          </Pressable>
-        </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Zip code (optional)</Text>
+            <TextInput
+              value={zipcode}
+              onChangeText={setZipcode}
+              placeholder="5-digit zip code"
+              placeholderTextColor={PLACEHOLDER}
+              keyboardType="number-pad"
+              style={styles.input}
+            />
+            <Text style={styles.helperText}>
+              Leaving this blank means location-based resource recommendations
+              will be disabled.
+            </Text>
+          </View>
 
-        <View style={styles.footerRow}>
-          <Text style={styles.footerText}>New here?</Text>
+          <Pressable
+            style={[styles.loginBtn, { marginTop: 20 }]}
+            onPress={handleCreateAccount}
+            accessibilityRole="button"
+          >
+            <Text style={styles.loginBtnText}>Create account</Text>
+          </Pressable>
+
           <Pressable
             accessibilityRole="button"
-            onPress={() => router.push("/(tabs)/create-account")}
+            style={{ alignSelf: "center" }}
+            onPress={() => router.back()}
           >
-            <Text style={styles.footerLink}>Create an account</Text>
+            <Text style={styles.linkText}>Already have an account? Sign in</Text>
           </Pressable>
         </View>
-        {!!error && (
-          <Text style={styles.errorText} accessibilityLiveRegion="polite">
-            {error}
-          </Text>
-        )}
       </ScrollView>
     </SafeAreaProvider>
   );
@@ -231,6 +224,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#1f2937",
   },
+  helperText: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 6,
+    lineHeight: 16,
+  },
   passwordRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -261,7 +260,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 14,
     alignItems: "center",
-    marginTop: 10,
     marginBottom: 14,
   },
   loginBtnText: {
@@ -272,28 +270,6 @@ const styles = StyleSheet.create({
   linkText: {
     color: GREEN_MAIN,
     textAlign: "center",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  footerRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 6,
-  },
-  footerText: {
-    fontSize: 13,
-    color: "#6b7280",
-  },
-  footerLink: {
-    fontSize: 13,
-    color: GREEN_TEXT,
-    fontWeight: "700",
-  },
-  errorText: {
-    marginTop: 16,
-    textAlign: "center",
-    color: ERROR_TEXT,
     fontSize: 13,
     fontWeight: "600",
   },
