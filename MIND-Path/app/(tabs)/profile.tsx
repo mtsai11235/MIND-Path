@@ -6,7 +6,7 @@ import {
   ScrollView,
   StyleSheet
 } from "react-native";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 /** ---------- Theme colors ---------- */
 const GREEN_MAIN   = "#3F9360";
@@ -28,7 +28,7 @@ export default function ProfileContent() {
     setPicked(prev => ({ ...prev, [key]: !prev[key] }));
 
   return (
-    <SafeAreaProvider style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#f3f4f6" }}>
       {/* Reuse shared header (avatar + bell) */}
       <View style={styles.header}>
         <View style={styles.avatar}><Text style={{ fontSize: 18 }}>🧑🏻‍🦱</Text></View>
@@ -131,7 +131,7 @@ export default function ProfileContent() {
           </Pressable>
         </View>
       </ScrollView>
-    </SafeAreaProvider>
+    </SafeAreaView>
   );
 }
 
