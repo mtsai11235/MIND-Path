@@ -88,7 +88,7 @@ export async function POST(req: Request) {
         },
       },
     },
-    stopWhen: [stepCountIs(3), hasToolCall('end_session')] // Stop after 10 steps OR when end_session tool is called
+    stopWhen: [hasToolCall('end_session')] // Stop after 10 steps OR when end_session tool is called
   });
 
   return result.toUIMessageStreamResponse({
