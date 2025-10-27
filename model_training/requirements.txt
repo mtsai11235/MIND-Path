@@ -1,0 +1,33 @@
+# Core ML/NLP dependencies
+torch>=2.2.0
+transformers>=4.57.0
+datasets>=2.12.0
+accelerate>=1.10.1
+safetensors>=0.6.2
+
+# Evaluation and metrics
+evaluate>=0.4.0
+seqeval>=1.2.0
+numpy>=1.17.0
+
+# Data generation and utilities
+faker>=20.0.0
+tqdm>=4.27.0
+
+# Core Python utilities
+pathlib2>=2.3.0; python_version < "3.4"
+json5>=0.9.0
+
+# Saving finetuned models
+onnx>=1.17.0
+onnxruntime>=1.17.0
+
+# Optional: For better performance on Apple Silicon
+# Uncomment if you want to use MPS acceleration
+# torch-audio>=2.2.0
+
+# Development and debugging (optional)
+# ipython>=8.0.0
+# jupyter>=1.0.0
+# matplotlib>=3.0.0
+# seaborn>=0.11.0
