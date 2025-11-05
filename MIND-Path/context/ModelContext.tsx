@@ -6,7 +6,7 @@ const ModelContext = createContext<{ session: InferenceSession | null }>({ sessi
 
 export const useModel = () => useContext(ModelContext);
 
-export const ModelProvider = ({ children }: { children: React.ReactNode }) => {
+export function ModelProvider ({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<InferenceSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 

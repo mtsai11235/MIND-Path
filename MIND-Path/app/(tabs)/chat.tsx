@@ -5,6 +5,8 @@ import { useState } from 'react';
 import { View, TextInput, ScrollView, Text, KeyboardAvoidingView, Platform, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { generateAPIUrl } from '@/utils/utils';
+import { sanitizeText } from '@/utils/modelUtils';
+import { useModel } from '@/context/ModelContext';
 
 /** ---------- Theme colors ---------- */
 const GREEN_LIGHT  = "#DDEFE6";
@@ -14,7 +16,10 @@ const PLACEHOLDER  = "#3a6a54";
 /** ---------- Chat screen ---------- */
 export default function ChatScreen() {
   const [input, setInput] = useState('');
-
+  const { session } = useModel();
+  if (!session) {
+    throw new Error("Model not initialized");
+  }
   // The useChat hook, by default, use the POST API route (/api/chat). 
   // messages: the current chat messages (an array of objects with id, role, and parts properties)
   // sendMessagess: a function to send a message to the chat API
@@ -109,10 +114,11 @@ export default function ChatScreen() {
               placeholderTextColor={PLACEHOLDER}
               value={input}
               onChange={e => setInput(e.nativeEvent.text)}
-              onSubmitEditing={e => {
+              onSubmitEditing={async e => {
                 e.preventDefault();
                 if (input.trim().length === 0) return;
-                sendMessage({ text: input });
+                const sanitizedInput = await sanitizeText(input, session);
+                sendMessage({ text: sanitizedInput });
                 setInput('');
               }}
               autoFocus={true}
@@ -123,9 +129,10 @@ export default function ChatScreen() {
             <TouchableOpacity
               style = {[styles.sendButton, (isLoading || input.trim.length === 0) && styles.sendButtonDisabled
               ]}
-              onPress={() => {
+              onPress={async () => {
                 if (input.trim().length === 0) return;
-                sendMessage({ text: input });
+                const sanitizedInput = await sanitizeText(input, session);
+                sendMessage({ text: sanitizedInput });
                 setInput('');
               }}
               disabled = {isLoading || input.trim().length===0}

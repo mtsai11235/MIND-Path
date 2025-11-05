@@ -5,7 +5,7 @@ import { encodeText, decodePredictions } from '@/utils/tokenizerUtils';
 let session: InferenceSession | null = null;
 
 /**
- * Load the ONNX model into memory once on app startup.
+ * Load the ONNX model into memory once on app startup and return the session.
  */
 export async function initModel() {
   if (session) return; // already loaded
@@ -16,12 +16,13 @@ export async function initModel() {
   // Create inference session
   session = await InferenceSession.create(modelPath);
   console.log("Model session initialized");
+  return session;
 }
 
 /**
  * Run inference on input text and return redacted/sanitized version.
  */
-export async function sanitizeText(text: string): Promise<string> {
+export async function sanitizeText(text: string, session: InferenceSession): Promise<string> {
   if (!session) throw new Error("Model not initialized");
 
   // Tokenize input text → convert to tensors

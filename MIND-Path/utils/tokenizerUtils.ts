@@ -1,12 +1,15 @@
 import { useTokenizer } from 'react-native-executorch';
 
-const wpTokenizer = useTokenizer({
-  tokenizer: {
-    tokenizerSource: require('../assets/mobilebert/tokenizer.json')
-  }
-});
+let wpTokenizer: ReturnType<typeof useTokenizer> | null = null;
+
+export function initTokenizer(tokenizerHook: ReturnType<typeof useTokenizer>) {
+  wpTokenizer = tokenizerHook;
+}
 
 export async function encodeText(text: string) {
+  if (!wpTokenizer) {
+    throw new Error('Tokenizer not initialized. Call initTokenizer first.');
+  }
   const wpEncoded = await wpTokenizer.encode(text);
   const inputIds = wpEncoded.getIds()
   const attentionMask = wpEncoded.getAttentionMask();
