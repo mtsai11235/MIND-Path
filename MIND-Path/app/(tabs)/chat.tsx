@@ -1,7 +1,7 @@
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { fetch as expoFetch } from 'expo/fetch';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { View, TextInput, ScrollView, Text, KeyboardAvoidingView, Platform, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { generateAPIUrl } from '@/utils/utils';
@@ -11,9 +11,40 @@ const GREEN_LIGHT  = "#DDEFE6";
 const GREEN_BORDER = "rgba(6,95,70,0.14)";
 const PLACEHOLDER  = "#3a6a54";
 
+/** ---------- Sanitization helper ---------- */
+async function sanitizeMessage(message: string): Promise<string> {
+  try {
+    // Note: Using http instead of https for localhost (https requires SSL certificates)
+    const response = await fetch('http://localhost:8000/sanitize', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ message }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Sanitization failed: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    console.log('Sanitized message:', data.sanitized_message);
+    return data.sanitized_message;
+  } catch (error) {
+    console.error('Error sanitizing message:', error);
+    // Fallback to original message if sanitization fails
+    return message;
+  }
+}
+
 /** ---------- Chat screen ---------- */
 export default function ChatScreen() {
   const [input, setInput] = useState('');
+  // Map to store original messages by message ID
+  const originalMessagesRef = useRef<Map<string, string>>(new Map());
+  // Track the last sanitized message to match with the new message ID
+  const lastSanitizedRef = useRef<string | null>(null);
+  const lastOriginalRef = useRef<string | null>(null);
 
   // The useChat hook, by default, use the POST API route (/api/chat). 
   // messages: the current chat messages (an array of objects with id, role, and parts properties)
@@ -72,24 +103,45 @@ export default function ChatScreen() {
           contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 12 }}
         >
           {messages.map(m => {
-            const isUser = m.role === 'user';
+            const isUser = (m.role as string) === 'user';
+            const messageText = m.parts.find(p => p.type === 'text')?.text || '';
+            
+            // For user messages, check if we have an original stored, or match by content
+            let displayText = messageText;
+            if (isUser) {
+              // Check if we have stored original for this ID
+              if (originalMessagesRef.current.has(m.id)) {
+                displayText = originalMessagesRef.current.get(m.id)!;
+              } else if (lastSanitizedRef.current && messageText === lastSanitizedRef.current) {
+                // Match by content if IDs don't match yet
+                displayText = lastOriginalRef.current || messageText;
+                // Store it for future renders
+                originalMessagesRef.current.set(m.id, displayText);
+                lastSanitizedRef.current = null;
+                lastOriginalRef.current = null;
+              }
+            }
+            
             return (
               <View
                 key={m.id}
                 style={[styles.msgRow, { alignItems: isUser ? 'flex-end' : 'flex-start' }]}
               >
                 <View style={isUser ? styles.bubbleUser : styles.bubbleAssistant}>
-                  {m.parts.map((part, i) => {
-                    if (part.type === 'text') {
-                      return (
-                        <Text key={`${m.id}-${i}`} style={styles.msgText}>
-                          {part.text}
-                        </Text>
-                      );
-                    }
-                    return null;
-                  })}
-              
+                  {isUser ? (
+                    <Text style={styles.msgText}>{displayText}</Text>
+                  ) : (
+                    m.parts.map((part, i) => {
+                      if (part.type === 'text') {
+                        return (
+                          <Text key={`${m.id}-${i}`} style={styles.msgText}>
+                            {part.text}
+                          </Text>
+                        );
+                      }
+                      return null;
+                    })
+                  )}
                 </View>
               </View>
             );
@@ -118,10 +170,21 @@ export default function ChatScreen() {
               placeholderTextColor={PLACEHOLDER}
               value={input}
               onChange={e => setInput(e.nativeEvent.text)}
-              onSubmitEditing={e => {
+              onSubmitEditing={async (e) => {
                 e.preventDefault();
                 if (input.trim().length === 0) return;
-                sendMessage({ text: input });
+                
+                const originalMessage = input.trim();
+                // Sanitize the message before sending to Gemini
+                const sanitizedMessage = await sanitizeMessage(originalMessage);
+                
+                // Store references for matching when message is added
+                lastSanitizedRef.current = sanitizedMessage;
+                lastOriginalRef.current = originalMessage;
+                
+                // Send sanitized message to Gemini
+                sendMessage({ text: sanitizedMessage });
+                
                 setInput('');
               }}
               autoFocus={true}
@@ -132,9 +195,20 @@ export default function ChatScreen() {
             <TouchableOpacity
               style = {[styles.sendButton, (isLoading || input.trim.length === 0) && styles.sendButtonDisabled
               ]}
-              onPress={() => {
+              onPress={async () => {
                 if (input.trim().length === 0) return;
-                sendMessage({ text: input });
+                
+                const originalMessage = input.trim();
+                // Sanitize the message before sending to Gemini
+                const sanitizedMessage = await sanitizeMessage(originalMessage);
+                
+                // Store references for matching when message is added
+                lastSanitizedRef.current = sanitizedMessage;
+                lastOriginalRef.current = originalMessage;
+                
+                // Send sanitized message to Gemini
+                sendMessage({ text: sanitizedMessage });
+                
                 setInput('');
               }}
               disabled = {isLoading || input.trim().length===0}

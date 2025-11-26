@@ -12,7 +12,7 @@ import { guiding_instructions } from './system-prompt';
 export async function POST(req: Request) {
   const { messages }: { messages: UIMessage[] } = await req.json();
   let latestIntakeData: IntakeData | null = null;
-//  call stremText, which accepst a configuration object that contains a model provider and messages
+//  call streamText, which accepts a configuration object that contains a model provider and messages
 //  the streamText function returns a StreamTextResult. This result object contains the toDataStreamResponse function which converts the result to a streamed response object 
   const result = streamText({
     model: google('gemini-2.5-flash'),
