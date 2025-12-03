@@ -25,6 +25,9 @@ export type Resource = {
   type: string;
   org?: string | null;
   url: string;
+  tags?: string | string[] | null;
+  symptom_tags?: string | string[] | null;
+  short_desc?: string | null;
 };
 
 export type SynonymRow = {
@@ -115,6 +118,32 @@ export async function fetchResourcesByIds(
   }));
 }
 
+export async function fetchResourcesForFuzzy(limit = 500): Promise<Resource[]> {
+  // Try to fetch extended columns; fallback if some columns are missing.
+  const fullColumns = "id,title,type,org,url,tags,symptom_tags,short_desc";
+  const minimalColumns = "id,title,type,org,url,short_desc";
+
+  const runSelect = (cols: string) =>
+    supabase.from("resources").select(cols).limit(limit);
+
+  let { data, error } = await runSelect(fullColumns);
+  if (error && /column .* does not exist/i.test(error.message)) {
+    ({ data, error } = await runSelect(minimalColumns));
+  }
+  if (error) throw error;
+
+  return (data ?? []).map((row: any) => ({
+    id: String(row.id),
+    title: row.title ?? "",
+    type: row.type ?? "",
+    org: row.org ?? null,
+    url: row.url ?? "",
+    tags: row.tags ?? null,
+    symptom_tags: row.symptom_tags ?? null,
+    short_desc: row.short_desc ?? null,
+  }));
+}
+
 
 export async function pingSupabase(): Promise<"ok"> {
   const { data, error } = await supabase.from("resources").select("id").limit(1);
@@ -128,5 +157,6 @@ export default {
   searchResourcesFuzzy,
   fetchSymptomSynonyms,
   fetchResourcesByIds,
+  fetchResourcesForFuzzy,
   pingSupabase,
 };

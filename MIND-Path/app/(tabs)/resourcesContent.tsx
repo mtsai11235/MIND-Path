@@ -13,8 +13,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Resource, searchResourcesFuzzy } from "@/utils/supabaseContent";
-import { fetchSymptomSynonyms } from "@/utils/supabaseContent";
+import Fuse from "fuse.js";
+import { Resource, fetchResourcesForFuzzy, fetchSymptomSynonyms } from "@/utils/supabaseContent";
 import { useAuth } from "@/context/AuthContext";
 
 /** ---------- Theme ---------- */
@@ -30,15 +30,64 @@ const { height: H } = Dimensions.get("window");
 const ensureHttp = (url: string) =>
   /^https?:\/\//i.test(url) ? url : `https://${url}`;
 
+const toStringArray = (input: any): string[] => {
+  if (Array.isArray(input)) return input.map(v => String(v)).filter(Boolean);
+  if (typeof input === "string") return input.split(/[,;]+/).map(v => v.trim()).filter(Boolean);
+  return [];
+};
+
+const normalizeToken = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
+const tokenizeQuery = (raw: string, stop: Set<string>) =>
+  raw
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map(normalizeToken)
+    .filter(t => t.length > 2 && !stop.has(t));
+
+// built-in symptom bridges to normalize intent
+const BUILTIN_SYNONYMS: Record<string, string[]> = {
+  insomnia: ["sleep", "sleep issues", "sleep problems", "trouble sleeping", "cant sleep", "can't sleep", "difficulty sleeping"],
+  sleep: ["insomnia", "sleep issues", "sleep problems", "trouble sleeping", "cant sleep", "can't sleep", "difficulty sleeping"],
+  anxiety: ["anxious", "panic"],
+  anxious: ["anxiety", "panic"],
+  depression: ["depressed", "feeling down", "sadness"],
+  depressed: ["depression", "feeling down", "sadness"],
+};
+
+const buildCanonicalLookup = (map: Record<string, string[]>) => {
+  const lookup = new Map<string, string>();
+  Object.entries(map).forEach(([key, variants]) => {
+    const canon = normalizeToken(key);
+    const list = [key, ...(variants ?? [])];
+    list.forEach(v => {
+      const norm = normalizeToken(v);
+      if (norm) lookup.set(norm, canon);
+    });
+  });
+  return lookup;
+};
+
+const canonicalizeList = (arr: string[], lookup: Map<string, string>) =>
+  Array.from(
+    new Set(
+      arr
+        .map(normalizeToken)
+        .map(t => lookup.get(t) ?? t)
+        .filter(Boolean)
+    )
+  );
+
 export default function ResourcesContent() {
   const router = useRouter();
   const { isLoggedIn, profile, updateProfile } = useAuth();
   const PAGE_SIZE = 5;
+  const FUSE_RESULT_LIMIT = 50;
   const STOPWORDS = useMemo(
     () => new Set(["i", "and", "the", "a", "an", "to", "of", "in", "on", "for", "with", "feel", "am", "is", "are"]),
     []
   );
   const [synonymMap, setSynonymMap] = useState<Record<string, string[]>>({});
+  const [allResources, setAllResources] = useState<Resource[]>([]);
 
   const toTagText = (input: any): string => {
     if (Array.isArray(input)) return input.join(" ").toLowerCase();
@@ -99,8 +148,179 @@ export default function ResourcesContent() {
     setErrorMsg(null);
 
     try {
-      const rows = await searchResourcesFuzzy(q);
-      setResults(rows);
+      let resources = allResources;
+      if (resources.length === 0) {
+        const fetched = await fetchResourcesForFuzzy();
+        resources = fetched.map(r => ({
+          ...r,
+          tags: toStringArray((r as any).tags),
+          symptom_tags: toStringArray((r as any).symptom_tags),
+          short_desc: (r as any).short_desc ?? "",
+        }));
+        setAllResources(resources);
+      }
+
+      // build canonical lookup merging server synonyms + builtin bridges
+      const mergedSynonyms: Record<string, string[]> = {
+        ...BUILTIN_SYNONYMS,
+        ...synonymMap,
+      };
+      const canonicalLookup = buildCanonicalLookup(mergedSynonyms);
+
+      // normalize tags/symptom_tags with canonical map for better grouping
+      const resourcesForFuse = resources.map(r => ({
+        ...r,
+        tags: canonicalizeList(toStringArray((r as any).tags), canonicalLookup),
+        symptom_tags: canonicalizeList(toStringArray((r as any).symptom_tags), canonicalLookup),
+        short_desc: (r as any).short_desc ?? "",
+      }));
+
+      const fuse = new Fuse(resourcesForFuse, {
+        includeScore: true,
+        threshold: 0.45,
+        ignoreLocation: true,
+        minMatchCharLength: 2,
+        keys: [
+          { name: "symptom_tags", weight: 0.4 },
+          { name: "title", weight: 0.35 },
+          { name: "tags", weight: 0.15 },
+          { name: "short_desc", weight: 0.05 },
+          { name: "org", weight: 0.05 },
+        ],
+      });
+
+      // --- normalize & canonicalize query ---
+      const tokens = tokenizeQuery(q, STOPWORDS);
+      const canonicalTokens = tokens
+        .map(t => canonicalLookup.get(t) ?? t)
+        .filter(Boolean);
+
+      // pick best matching key from synonym map (key + variants overlap with query tokens)
+      const synonymEntries = Object.entries(mergedSynonyms).map(([key, variants]) => ({
+        key: normalizeToken(key),
+        variants: (variants ?? []).map(normalizeToken).filter(Boolean),
+      }));
+
+      const scoreEntry = (entry: { key: string; variants: string[] }) => {
+        const pool = new Set([entry.key, ...entry.variants]);
+        let hits = 0;
+        for (const t of tokens) {
+          if (pool.has(t)) hits += 1;
+        }
+        // bonus if any variant substring appears in raw query
+        for (const v of pool) {
+          if (v.length > 2 && q.includes(v)) hits += 0.5;
+        }
+        return hits;
+      };
+
+      let bestKey: string | null = null;
+      let bestScore = 0;
+      for (const entry of synonymEntries) {
+        const sc = scoreEntry(entry);
+        if (sc > bestScore) {
+          bestScore = sc;
+          bestKey = entry.key;
+        }
+      }
+
+      const primary = bestKey || canonicalTokens[0] || tokens[0] || normalizeToken(q);
+
+      const primarySynonyms = new Set<string>();
+      (mergedSynonyms[primary] ?? []).forEach(v => {
+        const norm = normalizeToken(v);
+        if (norm) primarySynonyms.add(norm);
+      });
+
+      // only search primary + its synonyms + full phrase to reduce noise
+      const searchTerms: string[] = [];
+      if (primary) searchTerms.push(primary);
+      primarySynonyms.forEach(v => searchTerms.push(v));
+      if (!searchTerms.includes(q) && q.length > 0) searchTerms.push(q); // full phrase, limited later
+
+      const scored = new Map<string, { item: Resource; score: number; anchorHit: boolean; anchorCount: number }>();
+      const anchorTerms = new Set<string>();
+      const addAnchorTerms = (t: string) => {
+        const norm = normalizeToken(t);
+        if (norm) anchorTerms.add(norm);
+        t
+          .split(/[^a-z0-9]+/)
+          .map(normalizeToken)
+          .filter(Boolean)
+          .forEach(sub => anchorTerms.add(sub));
+      };
+      if (primary) addAnchorTerms(primary);
+      primarySynonyms.forEach(s => addAnchorTerms(s));
+
+      const runTermSearch = (term: string, limit = FUSE_RESULT_LIMIT, requireAnchor = true) => {
+        if (!term) return;
+        const hits = fuse.search(term, { limit });
+        for (const hit of hits) {
+          const id = hit.item.id;
+          const baseScore = hit.score ?? 0;
+          const existing = scored.get(id);
+
+          const textTokens = new Set(
+            [
+              (hit.item as any).title ?? "",
+              (hit.item as any).short_desc ?? "",
+              (hit.item as any).tags ?? "",
+              (hit.item as any).symptom_tags ?? "",
+            ]
+              .join(" ")
+              .split(/[^a-z0-9]+/)
+              .map(normalizeToken)
+              .filter(Boolean)
+          );
+          const anchorMatches = Array.from(anchorTerms).filter(t => t && textTokens.has(t));
+          const hasAnchor = anchorTerms.size === 0 || anchorMatches.length > 0;
+          if (requireAnchor && !hasAnchor) continue;
+
+          const adjustedScore = hasAnchor ? Math.max(0, baseScore - 0.05) : baseScore + 0.05;
+
+          const nextEntry = {
+            item: hit.item,
+            score: adjustedScore,
+            anchorHit: hasAnchor,
+            anchorCount: anchorMatches.length,
+          };
+          const prevEntry = scored.get(id);
+          const isBetter =
+            !prevEntry ||
+            (nextEntry.anchorHit && !prevEntry.anchorHit) ||
+            (nextEntry.anchorHit === prevEntry.anchorHit &&
+              (nextEntry.anchorCount > prevEntry.anchorCount ||
+                (nextEntry.anchorCount === prevEntry.anchorCount && nextEntry.score < prevEntry.score)));
+          if (isBetter) {
+            scored.set(id, nextEntry);
+          }
+        }
+      };
+
+      // run searches: primary + synonyms (full limit), phrase term with smaller limit, all requiring anchor
+      searchTerms.forEach(term => {
+        const isPhrase = term === q;
+        runTermSearch(term, isPhrase ? 10 : FUSE_RESULT_LIMIT, true);
+      });
+
+      // filling
+      if (scored.size < FUSE_RESULT_LIMIT) {
+        searchTerms.forEach(term => {
+          const isPhrase = term === q;
+          runTermSearch(term, isPhrase ? 10 : FUSE_RESULT_LIMIT, false);
+        });
+      }
+
+      const finalResults = Array.from(scored.values())
+        .sort((a, b) => {
+          if (a.anchorHit !== b.anchorHit) return a.anchorHit ? -1 : 1; // anchors first
+          if (a.anchorCount !== b.anchorCount) return b.anchorCount - a.anchorCount; // more anchor tokens first
+          return a.score - b.score;
+        })
+        .map(entry => entry.item)
+        .slice(0, FUSE_RESULT_LIMIT);
+
+      setResults(finalResults);
       setPage(0);
       setLastQuery(raw);
     } catch (e: any) {
@@ -115,46 +335,7 @@ export default function ResourcesContent() {
     () => (results.length === 0 ? 0 : Math.ceil(results.length / PAGE_SIZE)),
     [results.length]
   );
-  const orderedResults = useMemo(() => {
-    const tokens = lastQuery
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .map(t => t.trim())
-      .filter(t => t.length > 2 && !STOPWORDS.has(t));
-
-    if (tokens.length === 0) return results;
-
-    const seen = new Set<string>();
-    const bucketed: Resource[] = [];
-
-    for (const token of tokens) {
-      const variants = getVariants(token);
-      for (const r of results) {
-        if (seen.has(r.id)) continue;
-        const fullText = [
-          (r as any).title ?? "",
-          (r as any).short_desc ?? "",
-          (r as any).tags ?? "",
-          (r as any).symptom_tags ?? "",
-        ]
-          .join(" ")
-          .toLowerCase();
-        if (variants.some(v => fullText.includes(v))) {
-          bucketed.push(r);
-          seen.add(r.id);
-        }
-      }
-    }
-
-    // append any remaining results preserving original order
-    for (const r of results) {
-      if (!seen.has(r.id)) {
-        bucketed.push(r);
-        seen.add(r.id);
-      }
-    }
-    return bucketed;
-  }, [results, lastQuery, STOPWORDS]);
+  const orderedResults = useMemo(() => results, [results]);
 
   const pagedResults = useMemo(
     () => orderedResults.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE),

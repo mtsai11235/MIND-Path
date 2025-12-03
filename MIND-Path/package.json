@@ -42,6 +42,7 @@
     "expo-web-browser": "~15.0.7",
     "jest": "~29.7.0",
     "jest-expo": "~54.0.13",
+    "fuse.js": "^7.0.0",
     "nativewind": "^4.2.1",
     "node-fetch": "^3.3.2",
     "onnxruntime-react-native": "^1.23.0",
