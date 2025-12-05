@@ -16,7 +16,7 @@ import {
   Alert,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { useRouter } from "expo-router";
+import { useRouter,useLocalSearchParams } from "expo-router";
 import {
   searchProvidersPagedGeoAware,
   type ProviderRow,
@@ -60,6 +60,18 @@ export default function ResourcesTab() {
   const [removingProviderId, setRemovingProviderId] = useState<number | null>(null);
 
   const canLoadMore = rows.length < total;
+
+  // code snippet to receive params from chat page
+  // receive specialty from chat page
+  const { specialty : prefillSpecialty } = useLocalSearchParams();
+
+  // pre-fill specialty on providers page onced pushed from chat page
+  useEffect(() => {
+    if (prefillSpecialty) {
+      const specialty = Array.isArray(prefillSpecialty) ? prefillSpecialty[0] : prefillSpecialty;
+      setSpecialty(specialty);
+    }
+  }, [prefillSpecialty])
 
   const savedClinicIds = useMemo(
     () =>

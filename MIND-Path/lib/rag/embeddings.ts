@@ -1,26 +1,18 @@
 import 'dotenv/config';
 import { google } from '@ai-sdk/google';
 import { embedMany } from 'ai';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../../lib/supabaseClient'
 /**
  * Offline indexing: creates and saves vector embeddings of resource rows
  */
 // Load and validate environment variables
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_CONTENT_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+
 const geminiApiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 
-if (!supabaseUrl) {
-  throw new Error('Missing required environment variable: EXPO_PUBLIC_SUPABASE_CONTENT_URL');
-}
-if (!supabaseServiceKey) {
-  throw new Error('Missing required environment variable: EXPO_PUBLIC_SUPABASE_CONTENT_ANON_KEY');
-}
 if (!geminiApiKey) {
   throw new Error('Missing required environment variable: GOOGLE_GENERATIVE_AI_API_KEY');
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 
 interface Resource {
