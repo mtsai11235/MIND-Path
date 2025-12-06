@@ -9,6 +9,7 @@ import {
   FlatList,
   Dimensions,
   Animated, // animations for fade in/out
+  Image,
 } from "react-native";
 import { useRouter } from "expo-router";
 
@@ -62,6 +63,10 @@ const GREEN_BORDER = "rgba(6,95,70,0.14)";
 const GREEN_TEXT   = "#065F46";
 const PLACEHOLDER  = "#3a6a54";
 const CYAN         = "#0d9488";
+const lotusImg     = require("../../assets/images/lotus.png");
+const lotus2Img    = require("../../assets/images/lotus2.png");
+const avatarImg    = require("../../assets/images/avatar.png");
+const bellImg      = require("../../assets/images/bell.png");
 
 /** ---------- Screen ---------- */
 export default function Index() {
@@ -134,6 +139,7 @@ export default function Index() {
   // Actions
   const onStartConversation = () => router.push("/chat");
   const onRelatedResources  = () => router.push("/resources");
+  const onProfilePress      = () => router.push("/profile");
   const onMoodPress = (m: Mood) =>
     setSelectedMood((prev) => (prev === m.key ? null : m.key));
 
@@ -159,11 +165,17 @@ export default function Index() {
         <View onLayout={(e) => setTopH(e.nativeEvent.layout.height)}>
           {/* Header */}
           <View style={styles.header}>
-            <View style={styles.avatar}><Text style={{ fontSize: 18 }}>🧑🏻‍🦱</Text></View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onProfilePress}
+              style={styles.avatar}
+              hitSlop={8}
+            >
+              <Image source={avatarImg} style={styles.avatarImage} />
+            </Pressable>
             <View style={{ flex: 1 }} />
             <View style={styles.bellWrap}>
-              <Text style={{ fontSize: 20 }}>🔔</Text>
-              <View style={styles.badge}><Text style={styles.badgeText}>3</Text></View>
+              <Image source={bellImg} style={styles.bellImage} />
             </View>
           </View>
 
@@ -210,7 +222,9 @@ export default function Index() {
         {/* Big green card */}
         <View style={[styles.bigCard, { maxHeight: bigCardMaxH }]}>
           {/* Lotus badge */}
-          <View style={styles.lotus}><Text style={{ fontSize: 28 }}>🪷</Text></View>
+          <View style={styles.lotus}>
+            <Image source={lotusImg} style={styles.lotusImage} />
+          </View>
 
           {/* Inner content bubble */}
           <View style={styles.innerCard}>
@@ -271,11 +285,10 @@ export default function Index() {
               </Animated.View>
             </View>
 
-            {/* Decorative lotus inside the bubble (bottom-right) */}
-            <View pointerEvents="none" style={styles.innerLotusDecor}>
-              <View style={styles.innerLotusHalo} />
-              <Text style={styles.innerLotusEmoji}>🪷</Text>
-            </View>
+          {/* Decorative lotus inside the bubble (bottom-right) */}
+          <View pointerEvents="none" style={styles.innerLotusDecor}>
+            <Image source={lotus2Img} style={styles.innerLotusImage} />
+          </View>
           </View>
 
           {/* Search bar — near the very bottom */}
@@ -300,10 +313,10 @@ export default function Index() {
   );
 }
 
-/** ---------- Styles ---------- */
-const styles = StyleSheet.create({
-  // App background
-  container: { flex: 1, backgroundColor: "#f3f4f6" },
+  /** ---------- Styles ---------- */
+  const styles = StyleSheet.create({
+    // App background
+    container: { flex: 1, backgroundColor: "#fffaf3" },
 
   // Root page wrapper
   page: { flex: 1 },
@@ -316,25 +329,25 @@ const styles = StyleSheet.create({
     paddingTop: 4,
   },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#e5e7eb",
+    width: 40,
+    height: 40,
+    borderRadius: 0,
+    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   },
-  bellWrap: { position: "relative" },
-  badge: {
-    position: "absolute",
-    right: -4,
-    top: -2,
-    backgroundColor: "#22c55e",
-    borderRadius: 8,
-    paddingHorizontal: 4,
-    minWidth: 16,
-    alignItems: "center",
+  avatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 0,
+    resizeMode: "cover",
   },
-  badgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
+  bellWrap: { position: "relative" },
+  bellImage: {
+    width: 30,
+    height: 30,
+    resizeMode: "contain",
+  },
 
   // Greeting
   titleWrap: { paddingHorizontal: GUTTER, paddingTop: 6 },
@@ -381,6 +394,11 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     zIndex: 3,
   },
+  lotusImage: {
+    width: 40,
+    height: 40,
+    resizeMode: "contain",
+  },
 
   // Inner content bubble
   innerCard: {
@@ -390,7 +408,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: INNER_GUTTER,
     paddingBottom: 110,             // extra room for the lotus at bottom-right
     marginHorizontal: INNER_GUTTER - 4,
-    marginTop: 16,
+    marginTop: 1,
     flexGrow: 1,
     flexBasis: 0,
     zIndex: 2,
@@ -507,27 +525,18 @@ const styles = StyleSheet.create({
   // Decorative lotus inside bubble (bottom-right)
   innerLotusDecor: {
     position: "absolute",
-    right: 18,
-    bottom: 18,
+    right: 5,
+    bottom: 5,
     width: 92,
     height: 92,
     alignItems: "center",
     justifyContent: "center",
     zIndex: 1,
   },
-  innerLotusHalo: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: 46,
-    backgroundColor: "rgba(255,255,255,0.28)",
-    borderWidth: 1,
-    borderColor: GREEN_BORDER,
-  },
-  innerLotusEmoji: {
-    fontSize: 36,
+  innerLotusImage: {
+    width: 92,
+    height: 92,
+    resizeMode: "contain",
     opacity: 0.95,
   },
 
