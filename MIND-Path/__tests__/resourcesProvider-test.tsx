@@ -25,6 +25,7 @@ jest.mock("react-native-safe-area-context", () => {
 
 jest.mock("expo-router", () => ({
   useRouter: jest.fn(),
+  useLocalSearchParams: jest.fn(() => ({})),
 }));
 
 jest.mock("@/context/AuthContext", () => ({
