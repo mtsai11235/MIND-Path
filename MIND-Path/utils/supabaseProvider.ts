@@ -266,40 +266,79 @@ export async function searchProvidersPagedGeoAware(
   const specialty = params.specialty?.trim();
   const radius    = params.radiusMeters ?? 40234; // ~25 miles
 
-  // non-distance path
+  // If distance sort is OFF, just use the normal paged search
   if (!params.sortByDistance) {
     return searchProvidersPaged({ q, city, state, specialty, limit, offset });
   }
 
-  // resolve origin: GPS → ZIP → City/State
+  // ---------- 1) Resolve geo origin: GPS → ZIP → City/State ----------
   let ref: { lat: number; lng: number } | null = null;
-  if (typeof params.refLat === 'number' && typeof params.refLng === 'number') {
+
+  // GPS (preferred)
+  if (typeof params.refLat === "number" && typeof params.refLng === "number") {
     ref = { lat: params.refLat, lng: params.refLng };
   }
+
+  // ZIP fallback
   if (!ref && params.zip) {
     ref = await getZipCentroid(params.zip);
   }
+
+  // City+State fallback
   if (!ref && city && state) {
     ref = await getCityStateCentroid(city, state);
   }
+
+  // If we still have no geo reference, fall back to non-distance search
   if (!ref) {
     return searchProvidersPaged({ q, city, state, specialty, limit, offset });
   }
 
-  // distance-sorted candidates (do not push city/state to RPC)
+  // ---------- 2) Distance-sorted candidates around (lat, lng) ----------
   const allNearby = await fetchNearbyProviders(ref.lat, ref.lng, radius);
 
-  // client-side filters
-  let filtered = allNearby as (NearbyRow & Partial<ProviderRow>)[];
-  if (state)     filtered = filtered.filter(r => (r.state ?? '').toUpperCase() === state);
-  if (q)         filtered = filtered.filter(r => (r.basic_name ?? '').toUpperCase().includes(q.toUpperCase()));
-  if (specialty) filtered = filtered.filter(r => (r.specialty ?? '').toUpperCase().includes(specialty.toUpperCase()));
+  // Basic filters (state, name). We purposely do NOT apply specialty yet.
+  let baseFiltered = allNearby as (NearbyRow & Partial<ProviderRow>)[];
 
-  const total = filtered.length;
-  const page  = filtered.slice(offset, offset + limit);
+  if (state) {
+    baseFiltered = baseFiltered.filter(
+      (r) => (r.state ?? "").toUpperCase() === state
+    );
+  }
 
-  // normalize
-  const rows: ProviderRow[] = page.map(r => ({
+  if (q) {
+    const upperQ = q.toUpperCase();
+    baseFiltered = baseFiltered.filter((r) =>
+      (r.basic_name ?? "").toUpperCase().includes(upperQ)
+    );
+  }
+
+  // ---------- 3) Apply specialty filter with fallback ----------
+  let filteredWithSpecialty = baseFiltered;
+
+  if (specialty) {
+    const upperSpec = specialty.toUpperCase();
+    filteredWithSpecialty = baseFiltered.filter((r) =>
+      (r.specialty ?? "").toUpperCase().includes(upperSpec)
+    );
+  }
+
+  // If user gave a specialty but none of the nearby providers match it,
+  // fall back to the regular (non-distance) search using the same filters.
+  // This avoids "0 results" when we know the state may still have matches.
+  if (specialty && filteredWithSpecialty.length === 0) {
+    console.log(
+      "[GeoAware] No nearby providers match specialty; falling back to non-distance search."
+    );
+    return searchProvidersPaged({ q, city, state, specialty, limit, offset });
+  }
+
+  const effective = specialty ? filteredWithSpecialty : baseFiltered;
+  const total = effective.length;
+  const page  = effective.slice(offset, offset + limit);
+
+  // ---------- 4) Normalize shape to ProviderRow ----------
+  const rows: ProviderRow[] = page.map((r) => ({
     provider_id: r.provider_id,
     npi: null,
     basic_name: r.basic_name ?? null,
@@ -310,9 +349,53 @@ export async function searchProvidersPagedGeoAware(
     taxonomy_desc: null,
     specialty: r.specialty ?? null,
     updated_at: null,
-    distance_m: typeof r.distance_m === 'number' ? r.distance_m : null,
-  }))
+    distance_m:
+      typeof r.distance_m === "number" ? r.distance_m : null,
+  }));
+
   return { rows, total };
+}
+
+//Used for embedding search
+export type MatchedSpecialty = {
+  code: string;
+  label: string;
+  similarity: number;
+};
+
+export async function semanticSpecialty(query: string): Promise<string | null> {
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+
+  try {
+    const baseUrl = providerUrl!.replace(/\/$/, "");
+    const fnUrl = `${baseUrl}/functions/v1/mh_semantic_specialty`;
+
+    const resp = await fetch(fnUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // Supabase Edge Functions require an apikey header
+        apikey: providerAnon as string,
+        Authorization: `Bearer ${providerAnon}`,
+      },
+      body: JSON.stringify({ query: trimmed }),
+    });
+
+    if (!resp.ok) {
+      console.warn("semanticSpecialty: non-OK response", resp.status);
+      return null;
+    }
+
+    const json = (await resp.json()) as { specialties?: MatchedSpecialty[] };
+    const top = json.specialties?.[0];
+    if (!top) return null;
+
+    return top.label;
+  } catch (e) {
+    console.warn("semanticSpecialty fetch error", e);
+    return null;
+  }
 }
 
 /* =========================================================
