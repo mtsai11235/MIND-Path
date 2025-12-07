@@ -15,65 +15,30 @@ const GREEN_LIGHT  = "#DDEFE6";
 const GREEN_BORDER = "rgba(6,95,70,0.14)";
 const PLACEHOLDER  = "#3a6a54";
 
-/** ---------- Sanitization helper ---------- */
-async function sanitizeMessage(message: string): Promise<string> {
-  try {
-    // Note: Using http instead of https for localhost (https requires SSL certificates)
-    const response = await fetch('http://localhost:8000/sanitize', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ message }),
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Sanitization failed: ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    console.log('Sanitized message:', data.sanitized_message);
-    return data.sanitized_message;
-  } catch (error) {
-    console.error('Error sanitizing message:', error);
-    // Fallback to original message if sanitization fails
-    return message;
-  }
-}
 
 /** ---------- Chat screen ---------- */
 export default function ChatScreen() {
   const router = useRouter();
   const [input, setInput] = useState('');
-// Merge both approaches: include the refs for tracking original/sanitized messages *and* the assessment state and effect logic.
+  const [activeAssessment, setActiveAssessment] = useState<AssessmentContent | null>(null);
+  const [isAssessmentLoading, setAssessmentLoading] = useState(false);
+  const [recommendedAssessmentTitle, setRecommendedAssessmentTitle] = useState<string | null>(null);
+  const [recommendedConcern, setRecommendedConcern] = useState<string | null>(null);
+  const [showRecommendation, setShowRecommendation] = useState(false);
+  
+  // add delay in setShowRecommendation
+  useEffect(() => {
+    if (!recommendedConcern) {
+      setShowRecommendation(false);
+      return;
+    }
 
-import { useRef } from 'react';
+    const timer = setTimeout(() => {
+      setShowRecommendation(true);
+    }, 3000);
 
-// Map to store original messages by message ID
-const originalMessagesRef = useRef<Map<string, string>>(new Map());
-// Track the last sanitized message to match with the new message ID
-const lastSanitizedRef = useRef<string | null>(null);
-const lastOriginalRef = useRef<string | null>(null);
-
-const [activeAssessment, setActiveAssessment] = useState<AssessmentContent | null>(null);
-const [isAssessmentLoading, setAssessmentLoading] = useState(false);
-const [recommendedAssessmentTitle, setRecommendedAssessmentTitle] = useState<string | null>(null);
-const [recommendedConcern, setRecommendedConcern] = useState<string | null>(null);
-const [showRecommendation, setShowRecommendation] = useState(false);
-
-// add delay in setShowRecommendation
-useEffect(() => {
-  if (!recommendedConcern) {
-    setShowRecommendation(false);
-    return;
-  }
-
-  const timer = setTimeout(() => {
-    setShowRecommendation(true);
-  }, 3000);
-
-  return () => clearTimeout(timer);
-}, [recommendedConcern]);
+    return () => clearTimeout(timer);
+  }, [recommendedConcern]);
 
   const { messages, error, sendMessage, status } = useChat({
     transport: new DefaultChatTransport({
@@ -170,42 +135,17 @@ useEffect(() => {
         
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 12 }}>
           {messages.map(m => {
-            const isUser = (m.role as string) === 'user';
-            const messageText = m.parts.find(p => p.type === 'text')?.text || '';
-            
-            // For user messages, check if we have an original stored, or match by content
-            let displayText = messageText;
-            if (isUser) {
-              // Check if we have stored original for this ID
-              if (originalMessagesRef.current.has(m.id)) {
-                displayText = originalMessagesRef.current.get(m.id)!;
-              } else if (lastSanitizedRef.current && messageText === lastSanitizedRef.current) {
-                // Match by content if IDs don't match yet
-                displayText = lastOriginalRef.current || messageText;
-                // Store it for future renders
-                originalMessagesRef.current.set(m.id, displayText);
-                lastSanitizedRef.current = null;
-                lastOriginalRef.current = null;
-              }
-            }
+            const isUser = m.role === 'user';
             
             return (
               <View key={m.id} style={[styles.msgRow, { alignItems: isUser ? 'flex-end' : 'flex-start' }]}>
                 <View style={isUser ? styles.bubbleUser : styles.bubbleAssistant}>
-                  {isUser ? (
-                    <Text style={styles.msgText}>{displayText}</Text>
-                  ) : (
-                    m.parts.map((part, i) => {
-                      if (part.type === 'text') {
-                        return (
-                          <Text key={`${m.id}-${i}`} style={styles.msgText}>
-                            {part.text}
-                          </Text>
-                        );
-                      }
-                      return null;
-                    })
-                  )}
+                  {m.parts.map((part, i) => {
+                    if (part.type === 'text') {
+                      return <Text key={`${m.id}-${i}`} style={styles.msgText}>{part.text}</Text>;
+                    }               
+                    return null;
+                  })}
                 </View>
               </View>
             );
@@ -252,61 +192,30 @@ useEffect(() => {
 
 
         {/* Input area */}
-          <View style={styles.chatInputWrap}>
-            <TextInput
-              style={styles.chatInput}
-              placeholder="Say something..."
-              placeholderTextColor={PLACEHOLDER}
-              value={input}
-              onChange={e => setInput(e.nativeEvent.text)}
-              onSubmitEditing={async (e) => {
-                e.preventDefault();
-                if (input.trim().length === 0) return;
-                
-                const originalMessage = input.trim();
-                // Sanitize the message before sending to Gemini
-                const sanitizedMessage = await sanitizeMessage(originalMessage);
-                
-                // Store references for matching when message is added
-                lastSanitizedRef.current = sanitizedMessage;
-                lastOriginalRef.current = originalMessage;
-                
-                // Send sanitized message to Gemini
-                sendMessage({ text: sanitizedMessage });
-                
-                setInput('');
-              }}
-              autoFocus={true}
-              returnKeyType="send"
-              editable = {status !== "streaming"}
-            />
-            
+          <View style={{ paddingBottom: 8 }}>
+          {/* Button to trigger assessment */}
+          <View style={{ 
+            flexDirection: 'row', 
+            justifyContent: 'flex-start', 
+            paddingHorizontal: 8, 
+            marginBottom: 4 
+          }}>
             <TouchableOpacity
-              style = {[styles.sendButton, (isLoading || input.trim.length === 0) && styles.sendButtonDisabled
-              ]}
-              onPress={async () => {
-                if (input.trim().length === 0) return;
-                
-                const originalMessage = input.trim();
-                // Sanitize the message before sending to Gemini
-                const sanitizedMessage = await sanitizeMessage(originalMessage);
-                
-                // Store references for matching when message is added
-                lastSanitizedRef.current = sanitizedMessage;
-                lastOriginalRef.current = originalMessage;
-                
-                // Send sanitized message to Gemini
-                sendMessage({ text: sanitizedMessage });
-                
-                setInput('');
-              }}
-              disabled = {isLoading || input.trim().length===0}
-              >
-                {isLoading?
-                  <ActivityIndicator size = "small" color = "#fff" />
-                  : <Text style = {styles.sendButtonText}>Send</Text>  
-                }
-            </TouchableOpacity>
+            style={[
+              styles.assessmentTriggerButton,
+              (isAssessmentLoading || isLoading || !recommendedAssessmentTitle) && styles.sendButtonDisabled,
+            ]}
+            onPress={handleStartAssessment}
+            disabled={isAssessmentLoading || isLoading || !recommendedAssessmentTitle}
+          >
+            {isAssessmentLoading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.assessmentTriggerText}>
+                {recommendedAssessmentTitle ? 'Take assessment' : 'No assessment recommended yet'}
+              </Text>
+            )}
+          </TouchableOpacity>
           </View>
 
       {/** UI message to user to prompt them to explore the providers page with pre-filled specialty*/}
