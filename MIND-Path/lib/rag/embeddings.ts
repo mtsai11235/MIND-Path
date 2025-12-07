@@ -1,26 +1,18 @@
 import 'dotenv/config';
 import { google } from '@ai-sdk/google';
 import { embedMany } from 'ai';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../../lib/supabaseClient'
 /**
  * Offline indexing: creates and saves vector embeddings of resource rows
  */
 // Load and validate environment variables
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_CONTENT_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+
 const geminiApiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 
-if (!supabaseUrl) {
-  throw new Error('Missing required environment variable: EXPO_PUBLIC_SUPABASE_CONTENT_URL');
-}
-if (!supabaseServiceKey) {
-  throw new Error('Missing required environment variable: EXPO_PUBLIC_SUPABASE_CONTENT_ANON_KEY');
-}
 if (!geminiApiKey) {
   throw new Error('Missing required environment variable: GOOGLE_GENERATIVE_AI_API_KEY');
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 
 interface Resource {
@@ -40,7 +32,6 @@ interface Resource {
   created_at?: Date;
   is_published?: boolean;
   tags_all?: string[];
-  symptoms?: string[];
   
 }
 
@@ -48,32 +39,22 @@ interface Resource {
  * Build embedding text from resource fields： creates a "document" for each resource
  */
 function buildResourceEmbeddingText(resource: Resource): string {
-
+// 1. PRIORITIZE TAGS (best for matching)
+  let coreContent = "";
   
-  const parts: string[] = [];
-
-  // Description (key for semantic matching with intake symptoms)
-  if (resource.short_desc) {
-    parts.push(`Description: ${resource.short_desc}`);
+  if (resource.tags_all && resource.tags_all.length > 0) {
+    // If tags exist, they are the main content.
+    coreContent = `Keywords: ${resource.tags_all.join(', ')}.`;
+  } else {
+    // FALLBACK: If no tags, use description.
+    coreContent = `Summary: ${resource.short_desc || resource.title}`;
   }
 
+  // 2. ADD CONTEXT (The "Filter")
+  const context = `Type: ${resource.type || 'resource'}.`;
 
-  // if (resource.audience) {
-  //   parts.push(`For: ${resource.audience}`);
-  // }
-
-  // Crisis flag (important for matching crisis situations)
-  if (resource.crisis) {
-    parts.push('Crisis support available');
-  }
-
-  if (resource.symptoms) {
-    parts.push(`Symptoms: ${resource.symptoms}`)
-  }
-
-
-
-  return parts.join(' | ');
+  // 3. FINAL STRING
+  return `${coreContent} ${context}`;
 }
 
 /**
@@ -83,11 +64,10 @@ async function embedResources(batchSize: number = 25) {
   try {
 
     // 1. Get the IDs of resources that NEED embedding
-    //    We check the private 'resources' table for this.
     console.log("Fetching IDs of resources that need embedding from 'resources' table...");
     const { data: resourcesToEmbed, error: idError } = await supabase
       .from('resources')
-      .select('id') // Only get the ID
+      .select('id') 
       .is('embedding', null); // looks for any row where the "embedding" column is null
 
     if (idError) {
@@ -97,7 +77,7 @@ async function embedResources(batchSize: number = 25) {
 
     if (!resourcesToEmbed || resourcesToEmbed.length === 0) {
       console.log('✓ All resources are already embedded. Exiting.');
-      return; // Nothing to do
+      return;
     }
 
     // 2. Extract just the ID strings
@@ -107,14 +87,13 @@ async function embedResources(batchSize: number = 25) {
     console.log('Starting resource embedding process...\n');
 
     // 1. Fetch all resources without embeddings using the list of ids
-    //  queries the public resources_public view to get the full details
     const { data: resources, error: dataError } = await supabase
-      .from('resources_public')
+      .from('resources')
       .select('*')
       .in('id', resourceIds);
 
 if (dataError) {
-      console.error('Error fetching resource details from resources_public:', dataError);
+      console.error('Error fetching resource details from resources:', dataError);
       throw dataError;
     }
 

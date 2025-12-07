@@ -16,7 +16,7 @@ import {
   Alert,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { useRouter } from "expo-router";
+import { useRouter,useLocalSearchParams } from "expo-router";
 import {
   searchProvidersPagedGeoAware,
   type ProviderRow,
@@ -57,8 +57,21 @@ export default function ResourcesTab() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [offset, setOffset] = useState(0);
   const [savingProviderId, setSavingProviderId] = useState<number | null>(null);
+  const [removingProviderId, setRemovingProviderId] = useState<number | null>(null);
 
   const canLoadMore = rows.length < total;
+
+  // code snippet to receive params from chat page
+  // receive specialty from chat page
+  const { specialty : prefillSpecialty } = useLocalSearchParams();
+
+  // pre-fill specialty on providers page onced pushed from chat page
+  useEffect(() => {
+    if (prefillSpecialty) {
+      const specialty = Array.isArray(prefillSpecialty) ? prefillSpecialty[0] : prefillSpecialty;
+      setSpecialty(specialty);
+    }
+  }, [prefillSpecialty])
 
   const savedClinicIds = useMemo(
     () =>
@@ -96,7 +109,7 @@ export default function ResourcesTab() {
     return point;
   };
 
-  const handleSaveProvider = async (provider: ProviderRow) => {
+  const handleToggleProvider = async (provider: ProviderRow) => {
     const providerId =
       typeof provider.provider_id === "number" ? provider.provider_id : null;
     if (!providerId) {
@@ -110,7 +123,26 @@ export default function ResourcesTab() {
       return;
     }
 
-    if (savedClinicIds.has(providerIdStr) || savingProviderId === providerId) {
+    const isSaved = savedClinicIds.has(providerIdStr);
+    if (isSaved) {
+      if (removingProviderId === providerId) {
+        return;
+      }
+
+      setRemovingProviderId(providerId);
+      try {
+        const current = (profile?.clinicIds ?? []).map(id => id.toString());
+        const next = current.filter(id => id.trim() !== providerIdStr);
+        await updateProfile({ clinicIds: next });
+      } catch (error) {
+        console.warn("Failed to remove provider", error);
+      } finally {
+        setRemovingProviderId(prev => (prev === providerId ? null : prev));
+      }
+      return;
+    }
+
+    if (savingProviderId === providerId) {
       return;
     }
 
@@ -313,7 +345,8 @@ export default function ResourcesTab() {
                 : null;
             const isSaved = providerIdStr ? savedClinicIds.has(providerIdStr) : false;
             const isSaving = savingProviderId === r.provider_id;
-            const disableSave = !providerIdStr || isSaved || isSaving;
+            const isRemoving = removingProviderId === r.provider_id;
+            const disableSave = !providerIdStr || isSaving || isRemoving;
             return (
               <View key={providerKey} style={styles.card}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -339,16 +372,22 @@ export default function ResourcesTab() {
 
                 <TouchableOpacity
                   accessibilityRole="button"
-                  onPress={() => handleSaveProvider(r)}
+                  onPress={() => handleToggleProvider(r)}
                   disabled={disableSave}
                   activeOpacity={0.85}
                   style={[
                     styles.saveBtn,
-                    disableSave && styles.saveBtnDisabled,
+                    (isSaved || isSaving || isRemoving) && styles.saveBtnDisabled,
                   ]}
                 >
                   <Text style={styles.saveBtnText}>
-                    {isSaved ? 'Saved to profile' : isSaving ? 'Saving...' : 'Save to profile'}
+                    {isSaving
+                      ? 'Saving...'
+                      : isRemoving
+                        ? 'Removing...'
+                        : isSaved
+                          ? 'Saved to profile'
+                          : 'Save to profile'}
                   </Text>
                 </TouchableOpacity>
               </View>

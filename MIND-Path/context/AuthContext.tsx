@@ -36,6 +36,17 @@ type StoredUserProfile = {
   previousChatSessionIds: string[];
   recommendedResourceIds: string[];
   clinicIds: string[];
+  appointmentsByProvider: Record<string, StoredAppointment[]>;
+};
+
+type StoredAppointment = {
+  id: string;
+  title: string;
+  when: string;
+  startAt?: string | null;
+  notes?: string | null;
+  calendarEventId?: string | null;
+  calendarId?: string | null;
 };
 
 type CreateAccountPayload = StoredUserProfile & {
@@ -58,6 +69,7 @@ const EMPTY_PROFILE: StoredUserProfile = {
   previousChatSessionIds: [],
   recommendedResourceIds: [],
   clinicIds: [],
+  appointmentsByProvider: {},
 };
 
 type EncryptedProfileRecord = {
@@ -109,6 +121,7 @@ function normalizeProfile(data: Partial<StoredUserProfile>): StoredUserProfile {
     previousChatSessionIds: data.previousChatSessionIds ?? [],
     recommendedResourceIds: data.recommendedResourceIds ?? [],
     clinicIds: data.clinicIds ?? [],
+    appointmentsByProvider: data.appointmentsByProvider ?? {},
   };
 }
 
@@ -658,13 +671,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateProfile = useCallback(
     async (profileUpdates: Partial<StoredUserProfile>) => {
-      const baseProfile = profile ?? EMPTY_PROFILE;
-      const updatedProfile = normalizeProfile({ ...baseProfile, ...profileUpdates });
+      let nextProfile: StoredUserProfile | null = null;
 
-      setProfile(updatedProfile);
-      await persistEncryptedProfile(updatedProfile);
+      // Functional set avoids races when multiple updates happen back-to-back.
+      setProfile(prevProfile => {
+        const baseProfile = prevProfile ?? EMPTY_PROFILE;
+        const merged = normalizeProfile({ ...baseProfile, ...profileUpdates });
+        nextProfile = merged;
+        return merged;
+      });
+
+      if (!nextProfile) {
+        nextProfile = normalizeProfile({ ...EMPTY_PROFILE, ...profileUpdates });
+      }
+
+      await persistEncryptedProfile(nextProfile);
     },
-    [profile, persistEncryptedProfile]
+    [persistEncryptedProfile]
   );
 
   const value = useMemo<AuthContextValue>(

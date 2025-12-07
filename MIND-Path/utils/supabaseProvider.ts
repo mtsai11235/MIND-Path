@@ -48,6 +48,16 @@ export type ProviderRow = {
   distance_m?: number | null;
 };
 
+export type ProviderAddress = {
+  provider_id: number;
+  address_type: string | null;
+  address_1: string | null;
+  address_2: string | null;
+  city: string | null;
+  state: string | null;
+  postal_code: string | null;
+};
+
 export type SearchProvidersResult = {
   rows: ProviderRow[];
   total: number;
@@ -225,6 +235,19 @@ export async function fetchNearbyProviders(
     .returns<NearbyRow[]>();
   if (error) throw error;
   return (data ?? []) as NearbyRow[];
+}
+
+export async function fetchProviderAddress(providerId: number): Promise<ProviderAddress | null> {
+  if (!Number.isFinite(providerId)) return null;
+  const { data, error } = await supabaseProvider
+    .from("provider_address")
+    .select("provider_id,address_type,address_1,address_2,city,state,postal_code")
+    .eq("provider_id", providerId);
+  if (error) throw error;
+  const rows = (data ?? []) as ProviderAddress[];
+  if (!rows.length) return null;
+  const practice = rows.find(row => (row.address_type ?? "").toLowerCase() === "practice");
+  return practice ?? rows[0];
 }
 
 /* =========================================================

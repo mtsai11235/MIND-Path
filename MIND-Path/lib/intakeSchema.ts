@@ -9,7 +9,7 @@ const trimmed = z.string().trim().min(1)
 export const standardIntakeSchema = z.object({
     schema_version: z.literal('1.0').default('1.0'),
     primary_concern: trimmed.max(40)
-        .describe("The user's primary reported concern, e.g., 'anxious', 'depressed', 'stressed', 'sleep-deprived',  or 'okay', etc.."),
+        .describe("The user's primary reported concern, e.g., 'anxiety', 'depression', 'stress', 'insomnia', 'trauma', 'ptsd', etc.. You can extrapolate the primary concern keyword from user's input. For example, 'no motivation' could be a sign of depression; 'excess worry' could be a sign of anxiety."),
 
     key_symptoms: z.array(trimmed.max(60)) //array of 1-12 specific symptoms (each <= 60 chars)
         .min(1, 'Provide at least one symptom')
@@ -31,7 +31,7 @@ export const standardIntakeSchema = z.object({
     goals: z.string()
         .optional()
         .describe("What the user wishes to get out of this session. For example: "+
-                "'vent', 'coping technique', 'talk to a professional', 'education materials', etc."  
+                "'coping technique', 'talk to a professional', 'education materials', etc."  
         ),
 })
 const limitedText = (max=400) => z.string().trim().min(1).max(max);
@@ -48,11 +48,14 @@ export const crisisIntakeSchema = z.object({
 })
 
 export const endSessionSchema = z.object({
-  reason: z.enum(['user_said_done','goal_met','no_more_useful_questions']),
-  summary: z.string().trim().min(1).max(600)
-    .describe('Provide a short summary of the chat and offer a encouraging, mood-lifting note.'),
-  suggested_next: z.array(z.string().trim().min(1)).max(5).optional(),
-  follow_up_ok: z.boolean().optional()
+intake_summary: standardIntakeSchema
+    .describe("The final, complete set of intake data collected from the conversation. This is required to generate the action plan."),
+  
+  reason: z.enum(['user_request', 'goal_met', 'max_turns_reached'])
+    .describe("Why the session is moving to the planning phase."),
+    
+  user_confirmation: z.boolean()
+    .describe("True if the user explicitly said 'yes' or 'show me the plan'."),
 });
 
 

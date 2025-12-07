@@ -6,13 +6,12 @@ model_path = "./mobilebert-bert_phi_finetuned"
 model = AutoModel.from_pretrained(model_path)
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 
-text = "My name is John Doe and I live in New York."
+text = "My name is John and I live in New York."
 
 
 pipeline = pipeline(
     task="ner",
-    model=model_path,
-    dtype=torch.float16,
+    model=model_path
 )
 
 ner_result = pipeline(text)
