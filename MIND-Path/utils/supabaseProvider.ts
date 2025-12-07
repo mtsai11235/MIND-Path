@@ -266,78 +266,67 @@ export async function searchProvidersPagedGeoAware(
   const specialty = params.specialty?.trim();
   const radius    = params.radiusMeters ?? 40234; // ~25 miles
 
-  // If distance sort is OFF, just use the normal paged search
-  if (!params.sortByDistance) {
+  const hasRefLatLng =
+    typeof params.refLat === "number" && typeof params.refLng === "number";
+  const hasZip = !!params.zip && params.zip.trim().length > 0;
+
+  const wantDistance = !!params.sortByDistance;
+  // IMPORTANT:
+  // We only do true distance-based search if we actually have GPS or ZIP.
+  // Otherwise, we fall back to normal address-based search.
+  const useDistance = wantDistance && (hasRefLatLng || hasZip);
+
+  // ----- 1) No usable location -> normal (non-distance) search -----
+  if (!useDistance) {
     return searchProvidersPaged({ q, city, state, specialty, limit, offset });
   }
 
-  // ---------- 1) Resolve geo origin: GPS → ZIP → City/State ----------
+  // ----- 2) We DO have a usable location -> distance-based path -----
+  // Resolve origin: GPS -> ZIP
   let ref: { lat: number; lng: number } | null = null;
 
-  // GPS (preferred)
-  if (typeof params.refLat === "number" && typeof params.refLng === "number") {
-    ref = { lat: params.refLat, lng: params.refLng };
+  if (hasRefLatLng) {
+    ref = { lat: params.refLat as number, lng: params.refLng as number };
+  } else if (hasZip) {
+    ref = await getZipCentroid(params.zip!.trim());
   }
 
-  // ZIP fallback
-  if (!ref && params.zip) {
-    ref = await getZipCentroid(params.zip);
-  }
-
-  // City+State fallback
-  if (!ref && city && state) {
-    ref = await getCityStateCentroid(city, state);
-  }
-
-  // If we still have no geo reference, fall back to non-distance search
+  // Extreme fallback: if we still could not resolve, revert to normal search.
   if (!ref) {
     return searchProvidersPaged({ q, city, state, specialty, limit, offset });
   }
 
-  // ---------- 2) Distance-sorted candidates around (lat, lng) ----------
+  // distance-sorted candidates
   const allNearby = await fetchNearbyProviders(ref.lat, ref.lng, radius);
 
-  // Basic filters (state, name). We purposely do NOT apply specialty yet.
-  let baseFiltered = allNearby as (NearbyRow & Partial<ProviderRow>)[];
+  // client-side filters
+  let filtered = allNearby as (NearbyRow & Partial<ProviderRow>)[];
+
+  // Keep only providers that actually have a specialty string
+  filtered = filtered.filter(
+    (r) => (r.specialty ?? "").trim().length > 0
+  );
 
   if (state) {
-    baseFiltered = baseFiltered.filter(
+    filtered = filtered.filter(
       (r) => (r.state ?? "").toUpperCase() === state
     );
   }
-
   if (q) {
-    const upperQ = q.toUpperCase();
-    baseFiltered = baseFiltered.filter((r) =>
-      (r.basic_name ?? "").toUpperCase().includes(upperQ)
+    filtered = filtered.filter((r) =>
+      (r.basic_name ?? "").toUpperCase().includes(q.toUpperCase())
     );
   }
-
-  // ---------- 3) Apply specialty filter with fallback ----------
-  let filteredWithSpecialty = baseFiltered;
-
   if (specialty) {
-    const upperSpec = specialty.toUpperCase();
-    filteredWithSpecialty = baseFiltered.filter((r) =>
-      (r.specialty ?? "").toUpperCase().includes(upperSpec)
+    filtered = filtered.filter((r) =>
+      (r.specialty ?? "").toUpperCase().includes(specialty.toUpperCase())
     );
   }
 
-  // If user gave a specialty but none of the nearby providers match it,
-  // fall back to the regular (non-distance) search using the same filters.
-  // This avoids "0 results" when we know the state may still have matches.
-  if (specialty && filteredWithSpecialty.length === 0) {
-    console.log(
-      "[GeoAware] No nearby providers match specialty; falling back to non-distance search."
-    );
-    return searchProvidersPaged({ q, city, state, specialty, limit, offset });
-  }
+  const total = filtered.length;
+  const page  = filtered.slice(offset, offset + limit);
 
-  const effective = specialty ? filteredWithSpecialty : baseFiltered;
-  const total = effective.length;
-  const page  = effective.slice(offset, offset + limit);
-
-  // ---------- 4) Normalize shape to ProviderRow ----------
+  // normalize
   const rows: ProviderRow[] = page.map((r) => ({
     provider_id: r.provider_id,
     npi: null,
@@ -349,8 +338,7 @@ export async function searchProvidersPagedGeoAware(
     taxonomy_desc: null,
     specialty: r.specialty ?? null,
     updated_at: null,
-    distance_m:
-      typeof r.distance_m === "number" ? r.distance_m : null,
+    distance_m: typeof r.distance_m === "number" ? r.distance_m : null,
   }));
 
   return { rows, total };
