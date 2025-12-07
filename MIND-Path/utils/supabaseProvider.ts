@@ -155,27 +155,63 @@ export async function searchProvidersPaged(
   const q         = params.q?.trim();
   const specialty = params.specialty?.trim();
 
-  let query = supabaseProvider
-    .from('provider_search_mh_view')
-    .select('*', { count: 'exact' });
-
-  if (state)     query = query.eq('state', state);
-  if (city)      query = query.eq('city', city);
-  if (q)         query = query.ilike('basic_name', `%${q}%`);
-  if (specialty) query = query.ilike('specialty', `%${specialty}%`);
-
   const limit  = Math.max(1, Math.min(100, params.limit ?? 20));
   const offset = Math.max(0, params.offset ?? 0);
 
+  // 1) First try normal substring (ilike) search on the view
+  let query = supabaseProvider
+    .from("provider_search_mh_view")
+    .select("*", { count: "exact" });
+
+  if (state)     query = query.eq("state", state);
+  if (city)      query = query.eq("city", city);
+  if (q)         query = query.ilike("basic_name", `%${q}%`);
+  if (specialty) query = query.ilike("specialty", `%${specialty}%`);
+
   const { data, error, count } = await query
-    .order('basic_name', { ascending: true, nullsFirst: true })
-    .order('city',       { ascending: true, nullsFirst: true })
-    .order('state',      { ascending: true, nullsFirst: true })
-    .order('provider_id',{ ascending: true })
+    .order("basic_name",  { ascending: true, nullsFirst: true })
+    .order("city",        { ascending: true, nullsFirst: true })
+    .order("state",       { ascending: true, nullsFirst: true })
+    .order("provider_id", { ascending: true })
     .range(offset, offset + limit - 1);
 
   if (error) throw error;
-  return { rows: (data ?? []) as ProviderRow[], total: count ?? 0 };
+
+  const exactTotal = count ?? 0;
+  const exactRows  = (data ?? []) as ProviderRow[];
+
+  // 2) If we have results OR user didn't type any name/specialty,
+  //    just return the exact search results (keeps pagination & count).
+  if (exactTotal > 0 || (!q && !specialty)) {
+    return { rows: exactRows, total: exactTotal };
+  }
+
+  // 3) Fallback: use fuzzy RPC when exact search returns 0 results
+  //    We pull (limit + offset) rows from DB, then slice on client
+  const rpcLimit = Math.min(500, limit + offset); // safety cap
+
+  const { data: fuzzyData, error: fuzzyError } = await supabaseProvider
+    .rpc("search_providers_mh", {
+      p_state:     state || null,
+      p_city:      city  || null,
+      p_name:      q     || null,
+      p_specialty: specialty || null,
+      p_limit:     rpcLimit,
+    })
+    .returns<(ProviderRow & { score: number | null })[]>();
+
+  if (fuzzyError) throw fuzzyError;
+
+  const allFuzzy = (fuzzyData ?? []) as (ProviderRow & { score: number | null })[];
+  const totalFuzzy = allFuzzy.length;
+
+  // do paging client-side
+  const page = allFuzzy.slice(offset, offset + limit);
+
+  return {
+    rows: page,
+    total: totalFuzzy, // we only know total within rpcLimit window
+  };
 }
 
 /** RPC wrapper: distance-sorted candidates around (lat,lng). */
