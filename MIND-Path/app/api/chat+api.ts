@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { google } from '@ai-sdk/google';
 import { streamText, UIMessage, convertToModelMessages, stepCountIs, hasToolCall } from 'ai';
 import { type IntakeData, CrisisIntakeData, EndSessionData, standardIntakeSchema, crisisIntakeSchema, endSessionSchema } from '../../lib/intakeSchema';
@@ -7,17 +8,86 @@ import { guiding_instructions } from './system-prompt';
 import { z } from 'zod';
 import { supabase } from '../../lib/supabaseClient'
 
+// Validate API key is present
+if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+  console.error('ERROR: GOOGLE_GENERATIVE_AI_API_KEY environment variable is not set. Please set it in your .env file.');
+}
+
+/**
+ * Sanitize user messages by calling the backend PII sanitization server
+ */
+async function sanitizeMessage(message: string): Promise<string> {
+  try {
+    const sanitizeUrl = process.env.SANITIZE_API_URL || 'http://localhost:8000/sanitize';
+    const response = await fetch(sanitizeUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ message }),
+    });
+    
+    if (!response.ok) {
+      console.error(`Sanitization failed: ${response.statusText}`);
+      // Fallback to original message if sanitization fails
+      return message;
+    }
+    
+    const data = await response.json();
+    console.log('Sanitized message:', data.sanitized_message);
+    return data.sanitized_message;
+  } catch (error) {
+    console.error('Error sanitizing message:', error);
+    // Fallback to original message if sanitization fails
+    return message;
+  }
+}
+
 //API route to accept messages and stream back data. This API route creates a POST request endpoint at /api/chat 
 //asynch POST request handler, extract messages from the body of the request
 //the message variable contains a history of the conversation between user and the chatbot and provides the chatbot with the necessary context for the next generation
 export async function POST(req: Request) {
   const { messages }: { messages: UIMessage[] } = await req.json();
   let latestIntakeData: IntakeData | null = null;
-//  call stremText, which accepst a configuration object that contains a model provider and messages
+
+  // Sanitize user messages before sending to Gemini
+  const sanitizedMessages = await Promise.all(
+    messages.map(async (msg) => {
+      if (msg.role === 'user') {
+        // Extract all text parts and join them
+        const textParts = msg.parts
+          .filter(p => p.type === 'text')
+          .map(p => p.text);
+        const originalText = textParts.join('\n');
+        
+        if (originalText.trim()) {
+          // Sanitize the message via backend API
+          const sanitizedText = await sanitizeMessage(originalText);
+          
+          // Replace all text parts with the sanitized version
+          // Keep non-text parts (like tool calls) unchanged
+          const sanitizedParts = msg.parts.map(p => 
+            p.type === 'text' 
+              ? { ...p, text: sanitizedText }
+              : p
+          );
+          
+          return {
+            ...msg,
+            parts: sanitizedParts,
+          };
+        }
+      }
+      // Return assistant messages unchanged
+      return msg;
+    })
+  );
+
+//  call streamText, which accepts a configuration object that contains a model provider and messages
 //  the streamText function returns a StreamTextResult. This result object contains the toDataStreamResponse function which converts the result to a streamed response object 
   const result = streamText({
     model: google('gemini-2.5-flash'),
-    messages: convertToModelMessages(messages),
+    messages: convertToModelMessages(sanitizedMessages),
     system: guiding_instructions,
     tools: {
       /**
