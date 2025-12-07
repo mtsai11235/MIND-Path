@@ -1,5 +1,5 @@
 // app/(tabs)/resourcesContent.tsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Text,
   View,
@@ -13,7 +13,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { searchResourcesBySymptom, Resource } from "@/utils/supabaseContent";
+import Fuse from "fuse.js";
+import { Resource, fetchResourcesForFuzzy, fetchSymptomSynonyms } from "@/utils/supabaseContent";
 import { useAuth } from "@/context/AuthContext";
 
 /** ---------- Theme ---------- */
@@ -29,9 +30,350 @@ const { height: H } = Dimensions.get("window");
 const ensureHttp = (url: string) =>
   /^https?:\/\//i.test(url) ? url : `https://${url}`;
 
+const toStringArray = (input: any): string[] => {
+  if (Array.isArray(input)) return input.map(v => String(v)).filter(Boolean);
+  if (typeof input === "string") return input.split(/[,;]+/).map(v => v.trim()).filter(Boolean);
+  return [];
+};
+
+const normalizeToken = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
+const tokenizeQuery = (raw: string, stop: Set<string>) =>
+  raw
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map(normalizeToken)
+    .filter(t => t.length > 2 && !stop.has(t));
+
+// built-in symptom bridges to normalize intent
+const BUILTIN_SYNONYMS: Record<string, string[]> = {
+  adhd: [
+    "attention deficit",
+    "add",
+    "hyperactive",
+    "inattentive",
+    "impulsive",
+    "focus issues",
+    "easily distracted",
+    "restless",
+    "fidgety",
+    "procrastination",
+    "forgetful",
+    "zoning out",
+  ],
+  anger: [
+    "angry",
+    "irritable",
+    "rage",
+    "outburst",
+    "mad",
+    "furious",
+    "short fuse",
+    "snapping",
+    "lose temper",
+    "pissed off",
+    "blow up",
+  ],
+  anxiety: [
+    "anxious",
+    "panic",
+    "panic attack",
+    "worry",
+    "worried",
+    "nervous",
+    "fearful",
+    "social anxiety",
+    "overthinking",
+    "butterflies",
+    "tight chest",
+    "on edge",
+    "jitters",
+    "uneasy",
+    "tense",
+  ],
+  bipolar: [
+    "manic",
+    "mania",
+    "hypomania",
+    "mood swings",
+    "elevated mood",
+    "irritable",
+    "crash",
+    "highs and lows",
+    "racing thoughts",
+    "can't sleep when up",
+  ],
+  "brain fog": [
+    "foggy",
+    "can't think",
+    "mentally cloudy",
+    "hard to focus",
+    "spacey",
+    "forgetful",
+  ],
+  "chronic pain": [
+    "pain daily",
+    "constant pain",
+    "ache all the time",
+    "hurts all over",
+    "never stops hurting",
+  ],
+  depression: [
+    "depressed",
+    "sadness",
+    "low mood",
+    "feeling down",
+    "no motivation",
+    "hopeless",
+    "tearful",
+    "blue",
+    "worthless",
+    "empty",
+    "flat",
+    "down in the dumps",
+    "can't get out of bed",
+    "lifeless",
+  ],
+  "eating disorder": [
+    "anorexia",
+    "bulimia",
+    "binge eating",
+    "purging",
+    "overeating",
+    "restricting",
+    "body image",
+    "food issues",
+    "fear of weight",
+    "calorie counting",
+    "skip meals",
+    "throwing up",
+    "diet obsession",
+  ],
+  fatigue: [
+    "tired all the time",
+    "exhausted",
+    "wiped out",
+    "low energy",
+    "drained",
+    "no energy",
+  ],
+  grief: [
+    "loss",
+    "bereavement",
+    "mourning",
+    "sad about loss",
+    "miss someone",
+    "passed away",
+    "death in family",
+    "heartbroken",
+  ],
+  insomnia: [
+    "can't sleep",
+    "sleep issues",
+    "sleep problems",
+    "trouble sleeping",
+    "difficulty sleeping",
+    "wake up at night",
+    "poor sleep",
+    "up all night",
+    "broken sleep",
+    "night waking",
+    "stay awake",
+    "no sleep",
+  ],
+  "intrusive thoughts": [
+    "unwanted thoughts",
+    "scary thoughts",
+    "disturbing thoughts",
+    "thoughts won't stop",
+    "bad thoughts",
+  ],
+  loneliness: [
+    "lonely",
+    "isolated",
+    "no friends",
+    "alone",
+    "disconnected",
+    "feel left out",
+    "no one to talk to",
+  ],
+  ocd: [
+    "obsessive compulsive disorder",
+    "obsessive thoughts",
+    "compulsions",
+    "rituals",
+    "intrusive thoughts",
+    "checking",
+    "cleaning",
+    "counting",
+    "contamination fear",
+    "repeating",
+    "ruminating",
+  ],
+  "panic attack": [
+    "panic",
+    "heart racing",
+    "short of breath",
+    "chest tightness",
+    "dizzy",
+    "shaky",
+    "feel like dying",
+    "about to faint",
+    "can't breathe",
+  ],
+  postpartum: [
+    "after birth mood",
+    "baby blues",
+    "postnatal depression",
+    "postpartum anxiety",
+    "after having baby",
+    "new mom mood",
+  ],
+  ptsd: [
+    "post traumatic stress",
+    "trauma",
+    "flashbacks",
+    "nightmares",
+    "hypervigilant",
+    "startle",
+    "avoidance",
+    "reliving event",
+    "fight or flight",
+    "triggered",
+    "on guard",
+    "scared to sleep",
+  ],
+  relationship: [
+    "breakup",
+    "divorce",
+    "relationship stress",
+    "partner conflict",
+    "fighting with partner",
+    "arguing",
+    "toxic relationship",
+  ],
+  "self-harm": [
+    "self harm",
+    "cutting",
+    "hurting myself",
+    "burning myself",
+    "self injury",
+    "self-injury",
+  ],
+  "social anxiety": [
+    "fear of people",
+    "social fear",
+    "public speaking fear",
+    "shy in groups",
+    "avoid crowds",
+    "awkward in social situations",
+    "stage fright",
+  ],
+  stress: [
+    "stressed",
+    "overwhelmed",
+    "burned out",
+    "burnout",
+    "tension",
+    "pressure",
+    "too much to do",
+    "fried",
+    "stretched thin",
+    "swamped",
+  ],
+  "substance use": [
+    "addiction",
+    "alcohol use",
+    "drug use",
+    "opioid",
+    "cannabis",
+    "relapse",
+    "withdrawal",
+    "sobriety",
+    "drinking problem",
+    "using again",
+    "clean and sober",
+    "cravings",
+    "hangover",
+    "detox",
+    "drug cravings",
+  ],
+  "suicidal ideation": [
+    "suicidal thoughts",
+    "want to die",
+    "end it",
+    "kill myself",
+    "thoughts of suicide",
+    "end my life",
+    "no reason to live",
+  ],
+  "work stress": [
+    "job stress",
+    "burnout at work",
+    "toxic workplace",
+    "overworked",
+    "work anxiety",
+    "deadline stress",
+    "career stress",
+  ],
+  sleep: [
+    "insomnia",
+    "sleep issues",
+    "sleep problems",
+    "trouble sleeping",
+    "difficulty sleeping",
+    "wake up at night",
+    "poor sleep",
+    "up all night",
+    "broken sleep",
+    "night waking",
+    "stay awake",
+    "no sleep",
+  ],
+};
+
+const buildCanonicalLookup = (map: Record<string, string[]>) => {
+  const lookup = new Map<string, string>();
+  Object.entries(map).forEach(([key, variants]) => {
+    const canon = normalizeToken(key);
+    const list = [key, ...(variants ?? [])];
+    list.forEach(v => {
+      const norm = normalizeToken(v);
+      if (norm) lookup.set(norm, canon);
+    });
+  });
+  return lookup;
+};
+
+const canonicalizeList = (arr: string[], lookup: Map<string, string>) =>
+  Array.from(
+    new Set(
+      arr
+        .map(normalizeToken)
+        .map(t => lookup.get(t) ?? t)
+        .filter(Boolean)
+    )
+  );
+
 export default function ResourcesContent() {
   const router = useRouter();
   const { isLoggedIn, profile, updateProfile } = useAuth();
+  const PAGE_SIZE = 5;
+  const FUSE_RESULT_LIMIT = 50;
+  const STOPWORDS = useMemo(
+    () => new Set(["i", "and", "the", "a", "an", "to", "of", "in", "on", "for", "with", "feel", "am", "is", "are"]),
+    []
+  );
+  const [synonymMap, setSynonymMap] = useState<Record<string, string[]>>({});
+  const [allResources, setAllResources] = useState<Resource[]>([]);
+
+  const toTagText = (input: any): string => {
+    if (Array.isArray(input)) return input.join(" ").toLowerCase();
+    if (typeof input === "string") return input.toLowerCase();
+    return "";
+  };
+
+  const getVariants = (token: string): string[] =>
+    synonymMap[token] ? synonymMap[token] : [token];
 
   // symptom input state
   const [symptom, setSymptom] = useState("");
@@ -41,8 +383,26 @@ export default function ResourcesContent() {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Resource[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [lastQuery, setLastQuery] = useState("");
+  const [page, setPage] = useState(0);
   const [savingResourceId, setSavingResourceId] = useState<string | null>(null);
   const [removingResourceId, setRemovingResourceId] = useState<string | null>(null);
+
+  // load synonyms from Supabase
+  useEffect(() => {
+    let canceled = false;
+    (async () => {
+      try {
+        const map = await fetchSymptomSynonyms();
+        if (!canceled) setSynonymMap(map);
+      } catch (e) {
+        console.warn("Failed to load synonyms", e);
+      }
+    })();
+    return () => {
+      canceled = true;
+    };
+  }, []);
 
   const savedResourceIds = useMemo(
     () =>
@@ -56,7 +416,8 @@ export default function ResourcesContent() {
 
   /** ---------- runSearch Supabase RPC ---------- */
   const runSearch = async () => {
-    const q = symptom.trim().toLowerCase();
+    const raw = symptom.trim();
+    const q = raw.toLowerCase();
     if (!q) return;
 
     setDidSearch(true);
@@ -64,8 +425,181 @@ export default function ResourcesContent() {
     setErrorMsg(null);
 
     try {
-      const rows = await searchResourcesBySymptom(q);
-      setResults(rows);
+      let resources = allResources;
+      if (resources.length === 0) {
+        const fetched = await fetchResourcesForFuzzy();
+        resources = fetched.map(r => ({
+          ...r,
+          tags: toStringArray((r as any).tags),
+          symptom_tags: toStringArray((r as any).symptom_tags),
+          short_desc: (r as any).short_desc ?? "",
+        }));
+        setAllResources(resources);
+      }
+
+      // build canonical lookup merging server synonyms + builtin bridges
+      const mergedSynonyms: Record<string, string[]> = {
+        ...BUILTIN_SYNONYMS,
+        ...synonymMap,
+      };
+      const canonicalLookup = buildCanonicalLookup(mergedSynonyms);
+
+      // normalize tags/symptom_tags with canonical map for better grouping
+      const resourcesForFuse = resources.map(r => ({
+        ...r,
+        tags: canonicalizeList(toStringArray((r as any).tags), canonicalLookup),
+        symptom_tags: canonicalizeList(toStringArray((r as any).symptom_tags), canonicalLookup),
+        short_desc: (r as any).short_desc ?? "",
+      }));
+
+      const fuse = new Fuse(resourcesForFuse, {
+        includeScore: true,
+        threshold: 0.45,
+        ignoreLocation: true,
+        minMatchCharLength: 2,
+        keys: [
+          { name: "symptom_tags", weight: 0.4 },
+          { name: "title", weight: 0.35 },
+          { name: "tags", weight: 0.15 },
+          { name: "short_desc", weight: 0.05 },
+          { name: "org", weight: 0.05 },
+        ],
+      });
+
+      // --- normalize & canonicalize query ---
+      const tokens = tokenizeQuery(q, STOPWORDS);
+      const canonicalTokens = tokens
+        .map(t => canonicalLookup.get(t) ?? t)
+        .filter(Boolean);
+
+      // pick best matching key from synonym map (key + variants overlap with query tokens)
+      const synonymEntries = Object.entries(mergedSynonyms).map(([key, variants]) => ({
+        key: normalizeToken(key),
+        variants: (variants ?? []).map(normalizeToken).filter(Boolean),
+      }));
+
+      const scoreEntry = (entry: { key: string; variants: string[] }) => {
+        const pool = new Set([entry.key, ...entry.variants]);
+        let hits = 0;
+        for (const t of tokens) {
+          if (pool.has(t)) hits += 1;
+        }
+        // bonus if any variant substring appears in raw query
+        for (const v of pool) {
+          if (v.length > 2 && q.includes(v)) hits += 0.5;
+        }
+        return hits;
+      };
+
+      let bestKey: string | null = null;
+      let bestScore = 0;
+      for (const entry of synonymEntries) {
+        const sc = scoreEntry(entry);
+        if (sc > bestScore) {
+          bestScore = sc;
+          bestKey = entry.key;
+        }
+      }
+
+      const primary = bestKey || canonicalTokens[0] || tokens[0] || normalizeToken(q);
+
+      const primarySynonyms = new Set<string>();
+      (mergedSynonyms[primary] ?? []).forEach(v => {
+        const norm = normalizeToken(v);
+        if (norm) primarySynonyms.add(norm);
+      });
+
+      // only search primary + its synonyms + full phrase to reduce noise
+      const searchTerms: string[] = [];
+      if (primary) searchTerms.push(primary);
+      primarySynonyms.forEach(v => searchTerms.push(v));
+      if (!searchTerms.includes(q) && q.length > 0) searchTerms.push(q); // full phrase, limited later
+
+      const scored = new Map<string, { item: Resource; score: number; anchorHit: boolean; anchorCount: number }>();
+      const anchorTerms = new Set<string>();
+      const addAnchorTerms = (t: string) => {
+        const norm = normalizeToken(t);
+        if (norm) anchorTerms.add(norm);
+        t
+          .split(/[^a-z0-9]+/)
+          .map(normalizeToken)
+          .filter(Boolean)
+          .forEach(sub => anchorTerms.add(sub));
+      };
+      if (primary) addAnchorTerms(primary);
+      primarySynonyms.forEach(s => addAnchorTerms(s));
+
+      const runTermSearch = (term: string, limit = FUSE_RESULT_LIMIT, requireAnchor = true) => {
+        if (!term) return;
+        const hits = fuse.search(term, { limit });
+        for (const hit of hits) {
+          const id = hit.item.id;
+          const baseScore = hit.score ?? 0;
+          const existing = scored.get(id);
+
+          const textTokens = new Set(
+            [
+              (hit.item as any).title ?? "",
+              (hit.item as any).short_desc ?? "",
+              (hit.item as any).tags ?? "",
+              (hit.item as any).symptom_tags ?? "",
+            ]
+              .join(" ")
+              .split(/[^a-z0-9]+/)
+              .map(normalizeToken)
+              .filter(Boolean)
+          );
+          const anchorMatches = Array.from(anchorTerms).filter(t => t && textTokens.has(t));
+          const hasAnchor = anchorTerms.size === 0 || anchorMatches.length > 0;
+          if (requireAnchor && !hasAnchor) continue;
+
+          const adjustedScore = hasAnchor ? Math.max(0, baseScore - 0.05) : baseScore + 0.05;
+
+          const nextEntry = {
+            item: hit.item,
+            score: adjustedScore,
+            anchorHit: hasAnchor,
+            anchorCount: anchorMatches.length,
+          };
+          const prevEntry = scored.get(id);
+          const isBetter =
+            !prevEntry ||
+            (nextEntry.anchorHit && !prevEntry.anchorHit) ||
+            (nextEntry.anchorHit === prevEntry.anchorHit &&
+              (nextEntry.anchorCount > prevEntry.anchorCount ||
+                (nextEntry.anchorCount === prevEntry.anchorCount && nextEntry.score < prevEntry.score)));
+          if (isBetter) {
+            scored.set(id, nextEntry);
+          }
+        }
+      };
+
+      // run searches: primary + synonyms (full limit), phrase term with smaller limit, all requiring anchor
+      searchTerms.forEach(term => {
+        const isPhrase = term === q;
+        runTermSearch(term, isPhrase ? 10 : FUSE_RESULT_LIMIT, true);
+      });
+
+      // filling
+      if (scored.size < FUSE_RESULT_LIMIT) {
+        searchTerms.forEach(term => {
+          const isPhrase = term === q;
+          runTermSearch(term, isPhrase ? 10 : FUSE_RESULT_LIMIT, false);
+        });
+      }
+
+      const finalResults = Array.from(scored.values())
+        .sort((a, b) => {
+          if (a.anchorHit !== b.anchorHit) return a.anchorHit ? -1 : 1; // anchors first
+          if (a.anchorCount !== b.anchorCount) return b.anchorCount - a.anchorCount; // more anchor tokens first
+          return a.score - b.score;
+        })
+        .map(entry => entry.item)
+        .slice(0, FUSE_RESULT_LIMIT);
+
+      setResults(finalResults);
+      setPage(0);
+      setLastQuery(raw);
     } catch (e: any) {
       setResults([]);
       setErrorMsg(e?.message ?? String(e));
@@ -73,6 +607,48 @@ export default function ResourcesContent() {
       setLoading(false);
     }
   };
+
+  const totalPages = useMemo(
+    () => (results.length === 0 ? 0 : Math.ceil(results.length / PAGE_SIZE)),
+    [results.length]
+  );
+  const orderedResults = useMemo(() => results, [results]);
+
+  const pagedResults = useMemo(
+    () => orderedResults.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE),
+    [orderedResults, page]
+  );
+
+  const queryTokenCounts = useMemo(() => {
+    const rawTokens = lastQuery
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .map(t => t.trim())
+      .filter(t => t.length > 2 && !STOPWORDS.has(t));
+
+    // de-duplicate while preserving order
+    const seenTokens = new Set<string>();
+    const tokens: string[] = [];
+    for (const t of rawTokens) {
+      if (!seenTokens.has(t)) {
+        seenTokens.add(t);
+        tokens.push(t);
+      }
+    }
+
+    if (tokens.length === 0) return [];
+
+    return tokens
+      .map(token => {
+        const count = results.reduce((acc, r) => {
+          const tagText = `${toTagText((r as any).tags)} ${toTagText((r as any).symptom_tags)}`.trim();
+          const variants = getVariants(token);
+          return variants.some(v => tagText.includes(v)) ? acc + 1 : acc;
+        }, 0);
+        return { token, count };
+      })
+      .filter(entry => entry.count > 0);
+  }, [lastQuery, results, STOPWORDS, synonymMap]);
 
   const handleToggleResource = async (resource: Resource) => {
     const resourceId = resource.id?.trim();
@@ -179,12 +755,22 @@ export default function ResourcesContent() {
                 </Text>
               </View>
             ) : (
-              results.map(r => {
-                const isSaved = savedResourceIds.has(r.id);
-                const isSaving = savingResourceId === r.id;
-                const isRemoving = removingResourceId === r.id;
-                return (
-                  <View key={r.id} style={styles.card}>
+              <>
+                <Text style={styles.resultHint}>
+                  Showing {results.length} results for "{lastQuery}"
+                  {queryTokenCounts.length > 0
+                    ? `; matches — ${queryTokenCounts
+                      .map(entry => `${entry.token}: ${entry.count}`)
+                      .join(", ")}`
+                    : " (sorted by relevance)"}
+                  .
+                </Text>
+                {pagedResults.map(r => {
+                  const isSaved = savedResourceIds.has(r.id);
+                  const isSaving = savingResourceId === r.id;
+                  const isRemoving = removingResourceId === r.id;
+                  return (
+                    <View key={r.id} style={styles.card}>
                     {/* Title */}
                     <Text numberOfLines={2} style={styles.title}>
                       {r.title}
@@ -228,13 +814,37 @@ export default function ResourcesContent() {
                           : isRemoving
                             ? "Removing..."
                             : isSaved
-                              ? "Saved — tap to remove"
+                              ? "Saved to profile"
                               : "Save to profile"}
                       </Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <View style={styles.paginationRow}>
+                    <Pressable
+                      style={[styles.pageBtn, page === 0 && styles.pageBtnDisabled]}
+                      disabled={page === 0}
+                      onPress={() => setPage(p => Math.max(0, p - 1))}
+                    >
+                      <Text style={styles.pageBtnText}>Previous</Text>
+                    </Pressable>
+                    <Text style={styles.pageInfo}>
+                      Page {page + 1} of {totalPages}
+                    </Text>
+                    <Pressable
+                      style={[styles.pageBtn, page >= totalPages - 1 && styles.pageBtnDisabled]}
+                      disabled={page >= totalPages - 1}
+                      onPress={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                    >
+                      <Text style={styles.pageBtnText}>Next</Text>
                     </Pressable>
                   </View>
-                );
-              })
+                )}
+              </>
             )}
           </>
         )}
@@ -396,5 +1006,35 @@ const styles = StyleSheet.create({
     color: "#b91c1c",
     fontSize: 15,
     textAlign: "center",
+  },
+
+  paginationRow: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  pageBtn: {
+    flex: 1,
+    backgroundColor: GREEN_TEXT,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  pageBtnDisabled: {
+    backgroundColor: GREEN_BORDER,
+  },
+  pageBtnText: {
+    color: "#ffffff",
+    fontWeight: "700",
+  },
+  pageInfo: {
+    color: GREEN_TEXT,
+    fontWeight: "700",
+  },
+  resultHint: {
+    color: GREEN_TEXT_SOFT,
+    marginBottom: 8,
   },
 });

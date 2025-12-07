@@ -1,7 +1,7 @@
 // app/(tabs)/resources.tsx
 import React from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { View, Text, Pressable, StyleSheet, ScrollView } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
 import { useRouter, type Href } from "expo-router"; // Import Href for typed navigation
 
 // Global design colors
@@ -11,7 +11,6 @@ const G_BORDER = "rgba(16,82,60,0.12)";
 const G_TEXT = "#0F3D2E";
 const G_MUTED = "#6B7F75";
 const G_PRIMARY = "#2F6F4E";
-const G_PRIMARY_WEAK = "#8DB7A4";
 
 export default function ResourcesSwitch() {
   // Navigation hook for Expo Router
@@ -28,30 +27,34 @@ export default function ResourcesSwitch() {
 
         {/* Option A - Symptom search */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Option A — Symptom search</Text>
+          <Text style={styles.cardTitle}>Option A - Symptom search</Text>
           <Text style={styles.cardDesc}>Enter symptom keywords (e.g. anxiety / OCD / ADHD).</Text>
 
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={0.9}
+            accessibilityRole="button"
             // Navigate to Supabase search UI screen
             onPress={() => router.push("/(tabs)/resourcesContent" as Href)}
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+            style={styles.button}
           >
             <Text style={styles.buttonText}>Go to Choice 1</Text>
-          </Pressable>
+          </TouchableOpacity>
         </View>
 
         {/* Option B - Provider finder */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Option B — Provider finder</Text>
+          <Text style={styles.cardTitle}>Option B - Provider finder</Text>
           <Text style={styles.cardDesc}>Search by city/state/specialty. Includes distance ranking and pagination.</Text>
 
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={0.9}
+            accessibilityRole="button"
             // Navigate to provider search UI screen
             onPress={() => router.push("/(tabs)/resourcesProvider" as Href)}
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+            style={styles.button}
           >
             <Text style={styles.buttonText}>Go to Choice 2</Text>
-          </Pressable>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -84,13 +87,21 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: "800", color: G_TEXT },
   cardDesc: { marginTop: 6, color: G_MUTED },
   button: {
-    height: 44,
+    width: "100%",
+    minHeight: 48,
     borderRadius: 12,
     backgroundColor: G_PRIMARY,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 12,
+    paddingHorizontal: 14,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(47,111,78,0.28)",
   },
-  buttonPressed: { backgroundColor: G_PRIMARY_WEAK },
-  buttonText: { color: "#FFFFFF", fontWeight: "700", fontSize: 16 },
+  buttonText: { color: "#FFFFFF", fontWeight: "800", fontSize: 16, letterSpacing: 0.2 },
 });

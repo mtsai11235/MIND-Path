@@ -4,7 +4,8 @@ import { type IntakeData, CrisisIntakeData, EndSessionData, standardIntakeSchema
 import { matchResources } from '@/lib/rag/matching';
 import { generateActionPlan } from '@/lib/triage';
 import { guiding_instructions } from './system-prompt';
-
+import { z } from 'zod';
+import { supabase } from '../../lib/supabaseClient'
 
 //API route to accept messages and stream back data. This API route creates a POST request endpoint at /api/chat 
 //asynch POST request handler, extract messages from the body of the request
@@ -63,7 +64,7 @@ end_session: {
         execute: async ({ intake_summary }: EndSessionData) => {
           console.log('Generating plan for summary:', intake_summary);
         try {
-            // 1. Run Triage Logic (The code we wrote earlier)
+            // 1. Run Triage Logic
             const actionPlan = await generateActionPlan(intake_summary);
 
             // 2. Format for the LLM to read
@@ -98,8 +99,65 @@ end_session: {
           }
         },
       },
+
+  administerAssessment: {
+        description: 
+        'Fetches the questions for a standardized assessment so the CLIENT APP can render the questionnaire. ' +
+        'Do NOT print the questions or ask the user to answer them in chat. ' +
+        'After calling this tool, wait for the score via the analyzeAssessmentScore tool.',
+        inputSchema: z.object({
+          assessmentName: z.string().describe('The precise name or ID of the assessment to administer (e.g., "GAD-7", "PHQ-9")'),
+        }),
+        execute: async ({ assessmentName }) => {
+          // 1. Fetch the actual questions from DB
+          const { data, error } = await supabase
+            .from('resources')
+            .select('title, content') // content contains the questions JSON
+            .ilike('title', `%${assessmentName}%`)
+            .eq('type', 'assessment')
+            .limit(1)
+            .single();
+
+          if (error || !data) {
+            return { 
+              success: false, 
+              error: `Could not find assessment: ${assessmentName}` 
+            };
+          }
+
+          // 2. Return the questions to the client
+          // the UI will intercept it.
+          return {
+            success: true,
+            isUiTrigger: true, // Flag for frontend
+            data: {
+              title: data.title,
+              ...data.content
+            }
+          };
+        },
+      },
+      
+      /**
+       * NEW TOOL: Receive Score
+       * The LLM waits for this tool to be called by the CLIENT after the quiz is done.
+       */
+      analyzeAssessmentScore: {
+        description: 'Analyzes the calculated score from the assessment to determine severity.',
+        inputSchema: z.object({
+          assessmentName: z.string(),
+          score: z.number(),
+          severityLabel: z.string().describe('The calculated severity (e.g., Mild, Severe)'),
+        }),
+        execute: async ({ assessmentName, score, severityLabel }) => {
+            // Now the LLM knows the result and can recommend professionals
+            return {
+                info: `User scored ${score} on ${assessmentName}, which indicates ${severityLabel} symptoms.`
+            };
+        }
+      }
   },
-  stopWhen: [stepCountIs(10)] // adjust end condition later
+  stopWhen: [stepCountIs(25)] // adjust end condition later
 });
 
   return result.toUIMessageStreamResponse({
