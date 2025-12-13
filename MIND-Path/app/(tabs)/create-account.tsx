@@ -25,13 +25,11 @@ export default function CreateAccountScreen() {
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [zipcode, setZipcode] = useState("");
   const [secureEntry, setSecureEntry] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const resetForm = useCallback(() => {
     setUsername("");
     setPassword("");
-    setZipcode("");
     setSecureEntry(true);
   }, []);
 
@@ -45,7 +43,6 @@ export default function CreateAccountScreen() {
   const handleCreateAccount = async () => {
     const trimmedUsername = username.trim();
     const trimmedPassword = password.trim();
-    const trimmedZip = zipcode.trim();
 
     if (!trimmedUsername || !trimmedPassword) return;
 
@@ -59,7 +56,6 @@ export default function CreateAccountScreen() {
       await createAccount({
         username: trimmedUsername,
         password: trimmedPassword,
-        zipcode: trimmedZip,
         previousChatSessionIds: [],
         recommendedResourceIds: [],
         clinicIds: [],
@@ -96,8 +92,7 @@ export default function CreateAccountScreen() {
           <View style={styles.cardAccent} />
           <Text style={styles.cardTitle}>Create account</Text>
           <Text style={styles.cardSubtitle}>
-            Set up your login details and optionally share your zipcode for
-            location-based recommendations.
+            Set up your login details to start chatting and exploring resources.
           </Text>
 
           <View style={styles.field}>
@@ -133,22 +128,6 @@ export default function CreateAccountScreen() {
                 </Text>
               </Pressable>
             </View>
-          </View>
-
-          <View style={styles.field}>
-            <Text style={styles.label}>Zip code (optional)</Text>
-            <TextInput
-              value={zipcode}
-              onChangeText={setZipcode}
-              placeholder="5-digit zip code"
-              placeholderTextColor={PLACEHOLDER}
-              keyboardType="number-pad"
-              style={styles.input}
-            />
-            <Text style={styles.helperText}>
-              Leaving this blank means location-based resource recommendations
-              will be disabled.
-            </Text>
           </View>
 
           <Pressable
@@ -257,12 +236,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 14,
     color: "#1f2937",
-  },
-  helperText: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginTop: 6,
-    lineHeight: 16,
   },
   passwordRow: {
     flexDirection: "row",

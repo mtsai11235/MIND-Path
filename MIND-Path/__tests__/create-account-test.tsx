@@ -56,7 +56,7 @@ describe("<CreateAccountScreen />", () => {
     jest.clearAllMocks();
   });
 
-  test("creates account with optional zipcode and redirects", async () => {
+  test("creates account and redirects", async () => {
     const createAccountMock = jest.fn().mockResolvedValue(undefined);
     useAuthMock.mockReturnValue({
       createAccount: createAccountMock,
@@ -68,7 +68,6 @@ describe("<CreateAccountScreen />", () => {
 
     fireEvent.changeText(getByPlaceholderText("Choose a username"), "  user ");
     fireEvent.changeText(getByPlaceholderText("Create a password"), " secret ");
-    fireEvent.changeText(getByPlaceholderText("5-digit zip code"), " 12345 ");
 
     fireEvent.press(getByRole("button", { name: "Create account" }));
 
@@ -76,7 +75,6 @@ describe("<CreateAccountScreen />", () => {
       expect(createAccountMock).toHaveBeenCalledWith({
         username: "user",
         password: "secret",
-        zipcode: "12345",
         previousChatSessionIds: [],
         recommendedResourceIds: [],
         clinicIds: [],
@@ -95,11 +93,9 @@ describe("<CreateAccountScreen />", () => {
     const utils = render(<CreateAccountScreen />);
     const usernameInput = utils.getByPlaceholderText("Choose a username");
     const passwordInput = utils.getByPlaceholderText("Create a password");
-    const zipInput = utils.getByPlaceholderText("5-digit zip code");
 
     fireEvent.changeText(usernameInput, "user");
     fireEvent.changeText(passwordInput, "password");
-    fireEvent.changeText(zipInput, "12345");
 
     fireEvent.press(
       utils.getByRole("button", { name: "Create account" })
@@ -110,7 +106,6 @@ describe("<CreateAccountScreen />", () => {
     await waitFor(() => {
       expect(usernameInput.props.value).toBe("");
       expect(passwordInput.props.value).toBe("");
-      expect(zipInput.props.value).toBe("");
     });
   });
 
