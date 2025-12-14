@@ -49,9 +49,10 @@ type StoredAppointment = {
   calendarId?: string | null;
 };
 
-type CreateAccountPayload = StoredUserProfile & {
-  password: string;
-};
+type CreateAccountPayload = Omit<StoredUserProfile, "zipcode"> &
+  Partial<Pick<StoredUserProfile, "zipcode">> & {
+    password: string;
+  };
 
 type AuthContextValue = {
   isLoggedIn: boolean;
