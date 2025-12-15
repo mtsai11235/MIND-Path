@@ -16,6 +16,8 @@ an app to connect users with the necessary resources to handle their mental heal
 
    Add the missing API keys
 
+   We will be including relevant API keys in the submission document.
+
 4. **Run the Sanitization Server**
    
     Please refer to instructions in [Backend/README](https://github.com/mtsai11235/MIND-Path/blob/main/Backend/README.md)
